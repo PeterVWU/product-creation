@@ -1,0 +1,60 @@
+services:
+  magento-migration-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: magento-migration-api
+    image: magento-migration-api:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Server Configuration
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+
+      # Source Magento (replace with actual values or use .env file)
+      - SOURCE_MAGENTO_BASE_URL=${SOURCE_MAGENTO_BASE_URL}
+      - SOURCE_MAGENTO_TOKEN=${SOURCE_MAGENTO_TOKEN}
+
+      # Target Magento
+      - TARGET_MAGENTO_BASE_URL=${TARGET_MAGENTO_BASE_URL}
+      - TARGET_MAGENTO_TOKEN=${TARGET_MAGENTO_TOKEN}
+
+      # API Configuration
+      - API_TIMEOUT=30000
+      - MAX_RETRIES=3
+      - RETRY_DELAY=1000
+
+      # Concurrency Configuration
+      - MAX_CONCURRENT_REQUESTS=5
+      - MAX_IMAGE_SIZE_MB=10
+
+      # Migration Options
+      - DEFAULT_INCLUDE_IMAGES=true
+      - DEFAULT_CREATE_MISSING_ATTRIBUTES=true
+      - DEFAULT_OVERWRITE_EXISTING=false
+
+      # Error Handling
+      - CONTINUE_ON_ERROR=true
+
+    volumes:
+      # Persist logs outside container
+      - ./logs:/app/logs
+      # Optional: mount .env file for local development
+      # - ./.env:/app/.env:ro
+
+    networks:
+      - magento-network
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  magento-network:
+    driver: bridge

@@ -45,6 +45,133 @@ TARGET_MAGENTO_BASE_URL=https://h79xmxgomfk7jkn.ejuices.com
 TARGET_MAGENTO_TOKEN=your_target_token
 ```
 
+## Docker Setup
+
+### Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose v2+
+
+### Quick Start
+
+1. Configure environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your Magento credentials
+```
+
+2. Create the logs directory with proper permissions:
+```bash
+mkdir -p logs && chmod 777 logs
+```
+
+3. Build and start the container:
+```bash
+docker-compose up -d
+```
+
+4. Verify the container is running:
+```bash
+docker-compose ps
+```
+
+5. Check the health endpoint:
+```bash
+curl http://localhost:3000/api/v1/health
+```
+
+### Docker Commands
+
+**Build the image:**
+```bash
+docker-compose build
+```
+
+**Build without cache (after code changes):**
+```bash
+docker-compose build --no-cache
+```
+
+**Start the container:**
+```bash
+docker-compose up -d
+```
+
+**View logs:**
+```bash
+docker-compose logs -f
+```
+
+**Stop the container:**
+```bash
+docker-compose down
+```
+
+**Restart the container:**
+```bash
+docker-compose restart
+```
+
+### Configuration
+
+The container reads environment variables from the `.env` file. You can also override them directly in `docker-compose.yml`.
+
+Key environment variables:
+- `SOURCE_MAGENTO_BASE_URL` - Source Magento instance URL
+- `SOURCE_MAGENTO_TOKEN` - Source Magento API token
+- `TARGET_MAGENTO_BASE_URL` - Target Magento instance URL
+- `TARGET_MAGENTO_TOKEN` - Target Magento API token
+- `PORT` - Server port (default: 3000)
+- `LOG_LEVEL` - Logging level (default: info)
+
+### Volumes
+
+The container mounts the `./logs` directory to persist log files outside the container:
+```yaml
+volumes:
+  - ./logs:/app/logs
+```
+
+### Health Checks
+
+The container includes a built-in health check that verifies the API is responding:
+- Interval: 30 seconds
+- Timeout: 10 seconds
+- Start period: 40 seconds
+
+Check container health status:
+```bash
+docker inspect --format='{{.State.Health.Status}}' magento-migration-api
+```
+
+### Troubleshooting Docker
+
+**Container keeps restarting:**
+```bash
+# Check logs for errors
+docker-compose logs --tail=50
+
+# Common issue: logs directory permissions
+mkdir -p logs && chmod 777 logs
+docker-compose restart
+```
+
+**Port already in use:**
+```bash
+# Change the port mapping in docker-compose.yml
+ports:
+  - "3001:3000"  # Map to different host port
+```
+
+**Build fails with npm error:**
+```bash
+# Ensure package-lock.json exists
+npm install
+
+# Rebuild without cache
+docker-compose build --no-cache
+```
+
 ## Usage
 
 ### Start the Server

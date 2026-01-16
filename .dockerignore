@@ -1,0 +1,58 @@
+# Dependencies (will be installed in container)
+node_modules
+npm-debug.log
+
+# Environment files (configured at runtime)
+.env
+.env.*
+!.env.example
+
+# Logs (generated at runtime)
+logs
+*.log
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+overview.md
+*.md
+
+# Editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage
+.nyc_output
+test
+tests
+*.test.js
+*.spec.js
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Build artifacts
+dist
+build
+tmp
+temp
+
+# OS files
+.DS_Store
+Thumbs.db
