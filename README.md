@@ -11,6 +11,7 @@ A Node.js REST API server for migrating configurable products from a source Mage
 - Continue-on-error pattern (doesn't stop on non-critical errors)
 - Support for batch migrations
 - Health check endpoints
+- Real-time Google Chat notifications for migration status
 
 ## Prerequisites
 
@@ -484,6 +485,57 @@ DEFAULT_CREATE_MISSING_ATTRIBUTES=true
 CONTINUE_ON_ERROR=true
 ```
 
+## Google Chat Notifications
+
+The API can send real-time notifications to Google Chat when migrations start and complete.
+
+### Notification Types
+
+**Migration Start**
+- Sent when a product migration begins
+- Shows parent SKU and list of child SKUs being migrated
+
+**Migration Complete**
+- Sent when migration finishes (success or failure)
+- Shows status, duration, and children migrated count
+- Includes error details if migration failed
+- Provides a "View Product in Magento" button linking directly to the product admin page
+
+### Setup
+
+1. **Create a Google Chat Webhook**
+   - Open Google Chat and go to the space where you want notifications
+   - Click the space name > Apps & integrations > Webhooks
+   - Click "Create webhook", give it a name, and copy the webhook URL
+
+2. **Configure Environment Variables**
+
+Add to your `.env` file:
+```env
+# Google Chat Notifications
+GOOGLE_CHAT_ENABLED=true
+GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
+GOOGLE_CHAT_TIMEOUT=5000
+
+# Admin path for product links (found in your Magento admin URL)
+TARGET_MAGENTO_ADMIN_PATH=admin
+```
+
+### Configuration Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOOGLE_CHAT_ENABLED` | Enable/disable notifications | `false` |
+| `GOOGLE_CHAT_WEBHOOK_URL` | Webhook URL from Google Chat | (required if enabled) |
+| `GOOGLE_CHAT_TIMEOUT` | Request timeout in milliseconds | `5000` |
+| `TARGET_MAGENTO_ADMIN_PATH` | Magento admin URL path (e.g., `admin` or `admin_xyz123`) | `admin` |
+
+### Finding Your Admin Path
+
+Your Magento admin path is the segment after your domain in the admin URL:
+- If your admin URL is `https://example.com/admin/...` → admin path is `admin`
+- If your admin URL is `https://example.com/admin_SqwOPu4tsRle/...` → admin path is `admin_SqwOPu4tsRle`
+
 ## Error Handling
 
 The API uses a continue-on-error pattern:
@@ -515,6 +567,19 @@ If images fail to upload:
 1. Check image URLs are accessible
 2. Verify image file sizes (max 10MB by default)
 3. Check target Magento has sufficient storage
+
+### Google Chat Notifications Not Working
+
+If notifications aren't appearing:
+1. Verify `GOOGLE_CHAT_ENABLED=true` in your `.env` file
+2. Check that the webhook URL is correct and complete
+3. Ensure the webhook hasn't been deleted from the Google Chat space
+4. Check logs for timeout errors (increase `GOOGLE_CHAT_TIMEOUT` if needed)
+5. Verify network connectivity to `chat.googleapis.com`
+
+If the product link is incorrect:
+1. Verify `TARGET_MAGENTO_ADMIN_PATH` matches your Magento admin URL path
+2. Check that the migration completed successfully (product ID is only available on success)
 
 ## Architecture
 

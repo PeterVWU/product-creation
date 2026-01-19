@@ -5,6 +5,7 @@ const TargetService = require('../magento/target.service');
 const ExtractionService = require('./extraction.service');
 const PreparationService = require('./preparation.service');
 const CreationService = require('./creation.service');
+const GoogleChatService = require('../notification/google-chat.service');
 
 class OrchestratorService {
   constructor() {
@@ -23,6 +24,7 @@ class OrchestratorService {
     this.extractionService = new ExtractionService(this.sourceService);
     this.preparationService = new PreparationService(this.targetService);
     this.creationService = new CreationService(this.sourceService, this.targetService);
+    this.googleChatService = new GoogleChatService();
   }
 
   async migrateProduct(sku, options = {}) {
@@ -63,10 +65,14 @@ class OrchestratorService {
     try {
       const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
+      const childSkus = extractedData.children.map(child => child.sku);
+      await this.googleChatService.notifyMigrationStart(sku, childSkus);
+
       const preparedData = await this.executePreparationPhase(extractedData, migrationContext);
 
-      await this.executeCreationPhase(extractedData, preparedData, migrationOptions, migrationContext);
+      const creationResult = await this.executeCreationPhase(extractedData, preparedData, migrationOptions, migrationContext);
 
+      migrationContext.productId = creationResult.parentProductId;
       migrationContext.success = true;
 
       migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
@@ -79,6 +85,8 @@ class OrchestratorService {
         duration: `${migrationContext.summary.totalDuration}ms`,
         childrenMigrated: migrationContext.summary.childrenMigrated
       });
+
+      await this.googleChatService.notifyMigrationEnd(migrationContext);
 
       return migrationContext;
     } catch (error) {
@@ -98,6 +106,8 @@ class OrchestratorService {
         error: error.message,
         duration: `${migrationContext.summary.totalDuration}ms`
       });
+
+      await this.googleChatService.notifyMigrationEnd(migrationContext);
 
       return migrationContext;
     }

@@ -13,7 +13,8 @@ const config = {
 
   target: {
     baseUrl: process.env.TARGET_MAGENTO_BASE_URL,
-    token: process.env.TARGET_MAGENTO_TOKEN
+    token: process.env.TARGET_MAGENTO_TOKEN,
+    adminPath: process.env.TARGET_MAGENTO_ADMIN_PATH || 'admin'
   },
 
   api: {
@@ -35,6 +36,14 @@ const config = {
 
   errorHandling: {
     continueOnError: process.env.CONTINUE_ON_ERROR === 'true'
+  },
+
+  notifications: {
+    googleChat: {
+      enabled: process.env.GOOGLE_CHAT_ENABLED === 'true',
+      webhookUrl: process.env.GOOGLE_CHAT_WEBHOOK_URL,
+      timeout: parseInt(process.env.GOOGLE_CHAT_TIMEOUT, 10) || 5000
+    }
   }
 };
 

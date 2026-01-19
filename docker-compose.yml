@@ -21,6 +21,7 @@ services:
       # Target Magento
       - TARGET_MAGENTO_BASE_URL=${TARGET_MAGENTO_BASE_URL}
       - TARGET_MAGENTO_TOKEN=${TARGET_MAGENTO_TOKEN}
+      - TARGET_MAGENTO_ADMIN_PATH=${TARGET_MAGENTO_ADMIN_PATH}
 
       # API Configuration
       - API_TIMEOUT=30000
@@ -38,6 +39,11 @@ services:
 
       # Error Handling
       - CONTINUE_ON_ERROR=true
+      
+      # Google Chat Notifications
+      - GOOGLE_CHAT_ENABLED=${GOOGLE_CHAT_ENABLED}
+      - GOOGLE_CHAT_WEBHOOK_URL=${GOOGLE_CHAT_WEBHOOK_URL}
+      - GOOGLE_CHAT_TIMEOUT=${GOOGLE_CHAT_TIMEOUT}
 
     volumes:
       # Persist logs outside container

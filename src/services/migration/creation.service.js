@@ -33,11 +33,13 @@ class CreationService {
         options
       );
 
-      const parentImagesUploaded = await this.createConfigurableParent(
+      const parentResult = await this.createConfigurableParent(
         extractedData,
         preparedData,
         options
       );
+
+      result.parentProductId = parentResult.productId;
 
       await this.defineConfigurableOptions(
         extractedData,
@@ -53,7 +55,7 @@ class CreationService {
         (sum, child) => sum + (child.imagesUploaded || 0),
         0
       );
-      result.imagesUploaded = childImagesCount + parentImagesUploaded;
+      result.imagesUploaded = childImagesCount + parentResult.imagesUploaded;
 
       result.success = true;
 
@@ -230,24 +232,27 @@ class CreationService {
         custom_attributes: customAttributes
       };
 
-      await this.targetService.createProduct(productData);
+      const createdProduct = await this.targetService.createProduct(productData);
 
-      let parentImagesUploaded = 0;
+      let imagesUploaded = 0;
       if (options.includeImages && extractedData.images.parent.length > 0) {
         const parentImageResults = await this.imageService.migrateProductImages(
           parent.sku,
           extractedData.images.parent
         );
-        parentImagesUploaded = parentImageResults.success.length;
+        imagesUploaded = parentImageResults.success.length;
         logger.info('Parent images uploaded', {
           sku: parent.sku,
-          uploaded: parentImagesUploaded,
+          uploaded: imagesUploaded,
           failed: parentImageResults.failed.length
         });
       }
 
-      logger.info('Configurable parent created successfully', { sku: parent.sku });
-      return parentImagesUploaded;
+      logger.info('Configurable parent created successfully', { sku: parent.sku, productId: createdProduct.id });
+      return {
+        productId: createdProduct.id,
+        imagesUploaded
+      };
     } catch (error) {
       logger.error('Failed to create configurable parent', {
         sku: parent.sku,
