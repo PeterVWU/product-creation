@@ -56,6 +56,14 @@ const buildProductPayload = (productData, options = {}) => {
     payload.product.extension_attributes = productData.extension_attributes;
   }
 
+  // Add website_ids to extension_attributes for multi-store website assignment
+  if (productData.website_ids && Array.isArray(productData.website_ids)) {
+    if (!payload.product.extension_attributes) {
+      payload.product.extension_attributes = {};
+    }
+    payload.product.extension_attributes.website_ids = productData.website_ids;
+  }
+
   return payload;
 };
 

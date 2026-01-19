@@ -316,83 +316,143 @@ class OrchestratorService {
     const phaseStartTime = Date.now();
     const storeResults = {};
     let parentProductId = null;
-    let imagesUploaded = false;
+    let isFirstStore = true;
 
     logger.info('Executing multi-store creation phase', {
       sku: extractedData.parent.sku,
       targetStores
     });
 
-    for (const storeCode of targetStores) {
-      logger.info('Creating product for store', { sku: extractedData.parent.sku, storeCode });
+    // Fetch store-to-website mapping and collect unique website IDs
+    const storeWebsiteMapping = await this.targetService.getStoreWebsiteMapping();
+    const websiteIds = [...new Set(
+      targetStores.map(store => storeWebsiteMapping[store]).filter(Boolean)
+    )];
 
-      try {
+    logger.info('Resolved website IDs for target stores', {
+      targetStores,
+      websiteIds,
+      storeWebsiteMapping
+    });
+
+    for (const storeCode of targetStores) {
+      if (isFirstStore) {
+        // First store: Use GLOBAL endpoint (non-scoped) with all website_ids
+        // This ensures products are assigned to all target websites at creation time
+        logger.info('Creating product globally with website assignment (full creation)', {
+          sku: extractedData.parent.sku,
+          storeCode,
+          websiteIds
+        });
+
+        try {
+          // Use non-scoped (global) creation service for first store
+          const creationResult = await this.creationService.createProducts(
+            extractedData,
+            preparedData,
+            { ...options, websiteIds }
+          );
+
+          parentProductId = creationResult.parentProductId;
+
+          storeResults[storeCode] = {
+            success: true,
+            productId: creationResult.parentProductId,
+            childrenCreated: creationResult.createdChildren.filter(c => c.success).length,
+            imagesUploaded: creationResult.imagesUploaded || 0,
+            mode: 'full-creation'
+          };
+
+          // Update context with creation phase info
+          context.phases.creation.childrenCreated = storeResults[storeCode].childrenCreated;
+          context.phases.creation.imagesUploaded = storeResults[storeCode].imagesUploaded;
+
+          if (creationResult.warnings && creationResult.warnings.length > 0) {
+            context.warnings.push(...creationResult.warnings.map(w => ({ ...w, storeCode })));
+          }
+
+          logger.info('First store creation successful', { sku: extractedData.parent.sku, storeCode });
+          isFirstStore = false;
+        } catch (error) {
+          logger.error('First store creation failed', {
+            sku: extractedData.parent.sku,
+            storeCode,
+            error: error.message
+          });
+
+          storeResults[storeCode] = {
+            success: false,
+            error: error.message,
+            mode: 'full-creation'
+          };
+
+          context.errors.push({
+            phase: 'creation',
+            storeCode,
+            message: error.message,
+            details: error.details || error.stack
+          });
+
+          // If first store fails, we can't proceed with other stores
+          // because the global resources (products, options, links) weren't created
+          if (!config.errorHandling.continueOnError) {
+            throw error;
+          }
+          // If continueOnError is true, try next store as first store
+          // (isFirstStore remains true)
+        }
+      } else {
+        // Subsequent stores: Only update store-scoped attributes
         // Create scoped services for this store
         const scopedTargetService = this.targetService.createScopedInstance(storeCode);
         const scopedCreationService = new CreationService(this.sourceService, scopedTargetService);
 
-        // Only include images for the first store (images are shared across stores in Magento)
-        const storeOptions = {
-          ...options,
-          includeImages: options.includeImages && !imagesUploaded
-        };
-
-        const creationResult = await scopedCreationService.createProducts(
-          extractedData,
-          preparedData,
-          storeOptions
-        );
-
-        // Track if images were uploaded (only do this once)
-        if (storeOptions.includeImages && creationResult.imagesUploaded > 0) {
-          imagesUploaded = true;
-        }
-
-        // Use productId from first successful store
-        if (!parentProductId && creationResult.parentProductId) {
-          parentProductId = creationResult.parentProductId;
-        }
-
-        storeResults[storeCode] = {
-          success: true,
-          productId: creationResult.parentProductId,
-          childrenCreated: creationResult.createdChildren.filter(c => c.success).length,
-          imagesUploaded: creationResult.imagesUploaded || 0
-        };
-
-        // Update context with creation phase info (aggregate across stores)
-        context.phases.creation.childrenCreated = (context.phases.creation.childrenCreated || 0) +
-          storeResults[storeCode].childrenCreated;
-        context.phases.creation.imagesUploaded = (context.phases.creation.imagesUploaded || 0) +
-          storeResults[storeCode].imagesUploaded;
-
-        if (creationResult.warnings && creationResult.warnings.length > 0) {
-          context.warnings.push(...creationResult.warnings.map(w => ({ ...w, storeCode })));
-        }
-
-        logger.info('Store creation successful', { sku: extractedData.parent.sku, storeCode });
-      } catch (error) {
-        logger.error('Store creation failed', {
+        logger.info('Updating product for subsequent store (attributes only)', {
           sku: extractedData.parent.sku,
-          storeCode,
-          error: error.message
+          storeCode
         });
 
-        storeResults[storeCode] = {
-          success: false,
-          error: error.message
-        };
+        try {
+          const updateResult = await scopedCreationService.updateProductsForStore(
+            extractedData,
+            preparedData
+          );
 
-        context.errors.push({
-          phase: 'creation',
-          storeCode,
-          message: error.message,
-          details: error.details || error.stack
-        });
+          storeResults[storeCode] = {
+            success: true,
+            productId: parentProductId,
+            childrenUpdated: updateResult.updatedChildren.filter(c => c.success).length,
+            mode: 'store-update'
+          };
 
-        // Check if we should continue to next store on error
-        if (!config.errorHandling.continueOnError) {
-          throw error;
+          if (updateResult.warnings && updateResult.warnings.length > 0) {
+            context.warnings.push(...updateResult.warnings.map(w => ({ ...w, storeCode })));
+          }
+
+          logger.info('Store update successful', { sku: extractedData.parent.sku, storeCode });
+        } catch (error) {
+          logger.error('Store update failed', {
+            sku: extractedData.parent.sku,
+            storeCode,
+            error: error.message
+          });
+
+          storeResults[storeCode] = {
+            success: false,
+            error: error.message,
+            mode: 'store-update'
+          };
+
+          context.errors.push({
+            phase: 'store-update',
+            storeCode,
+            message: error.message,
+            details: error.details || error.stack
+          });
+
+          if (!config.errorHandling.continueOnError) {
+            throw error;
+          }
         }
       }
     }
@@ -403,7 +463,11 @@ class OrchestratorService {
     logger.info('Multi-store creation phase completed', {
       sku: extractedData.parent.sku,
       duration: `${context.phases.creation.duration}ms`,
-      storeResults: Object.keys(storeResults).map(s => ({ store: s, success: storeResults[s].success }))
+      storeResults: Object.keys(storeResults).map(s => ({
+        store: s,
+        success: storeResults[s].success,
+        mode: storeResults[s].mode
+      }))
     });
 
     return {

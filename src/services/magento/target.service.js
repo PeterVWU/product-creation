@@ -195,6 +195,22 @@ class TargetService extends MagentoClient {
       return null;
     }
   }
+
+  async getStoreWebsiteMapping() {
+    logger.debug('Fetching store to website mapping');
+    try {
+      const storeViews = await this.get('/rest/V1/store/storeViews');
+      const mapping = {};
+      for (const store of storeViews) {
+        mapping[store.code] = store.website_id;
+      }
+      logger.debug('Store website mapping retrieved', { mapping });
+      return mapping;
+    } catch (error) {
+      logger.error('Failed to fetch store website mapping', { error: error.message });
+      throw error;
+    }
+  }
 }
 
 module.exports = TargetService;

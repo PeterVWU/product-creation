@@ -78,6 +78,90 @@ class CreationService {
     }
   }
 
+  /**
+   * Update products for a specific store scope (store-scoped attributes only)
+   * Used for subsequent stores after the first store has done the full creation.
+   * Only updates store-scoped attributes: name, price, status, visibility
+   */
+  async updateProductsForStore(extractedData, preparedData) {
+    const { parent, children } = extractedData;
+    const startTime = Date.now();
+
+    logger.info('Updating products for store scope', {
+      parentSku: parent.sku,
+      childCount: children.length
+    });
+
+    const result = {
+      success: false,
+      parentSku: parent.sku,
+      updatedChildren: [],
+      errors: [],
+      warnings: []
+    };
+
+    try {
+      // Update parent product store-scoped attributes
+      await this.targetService.updateProduct(parent.sku, {
+        sku: parent.sku,
+        name: parent.name,
+        price: parent.price,
+        status: constants.MAGENTO_API.STATUS.ENABLED,
+        visibility: constants.MAGENTO_API.VISIBILITY.CATALOG_SEARCH
+      });
+
+      logger.info('Parent product updated for store', { sku: parent.sku });
+
+      // Update child products store-scoped attributes
+      for (const child of children) {
+        try {
+          await this.targetService.updateProduct(child.sku, {
+            sku: child.sku,
+            name: child.name,
+            price: child.price,
+            status: constants.MAGENTO_API.STATUS.ENABLED,
+            visibility: constants.MAGENTO_API.VISIBILITY.NOT_VISIBLE
+          });
+          result.updatedChildren.push({ sku: child.sku, success: true });
+          logger.debug('Child product updated for store', { sku: child.sku });
+        } catch (error) {
+          logger.error('Failed to update child for store', { sku: child.sku, error: error.message });
+          result.updatedChildren.push({ sku: child.sku, success: false, error: error.message });
+          result.errors.push({
+            phase: 'store-update',
+            sku: child.sku,
+            message: error.message
+          });
+
+          if (!config.errorHandling.continueOnError) {
+            throw error;
+          }
+        }
+      }
+
+      result.success = true;
+      const duration = Date.now() - startTime;
+      logger.info('Store-scoped update completed', {
+        parentSku: parent.sku,
+        childrenUpdated: result.updatedChildren.filter(c => c.success).length,
+        duration: `${duration}ms`
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Store-scoped update failed', {
+        parentSku: parent.sku,
+        error: error.message
+      });
+      result.errors.push({
+        phase: 'store-update',
+        message: error.message,
+        details: error.stack
+      });
+      throw new CreationError(error.message, result);
+    }
+  }
+
   async createSimpleProducts(extractedData, preparedData, options) {
     logger.info('Creating simple products', { count: extractedData.children.length });
 
@@ -92,7 +176,8 @@ class CreationService {
         const productData = this.buildSimpleProductData(
           child,
           preparedData,
-          linkData
+          linkData,
+          options
         );
 
         logger.info('Creating simple product', { sku: productData.sku });
@@ -136,7 +221,7 @@ class CreationService {
     return createdProducts;
   }
 
-  buildSimpleProductData(sourceProduct, preparedData, linkData) {
+  buildSimpleProductData(sourceProduct, preparedData, linkData, options = {}) {
     const customAttributes = [];
 
     if (linkData && linkData.attributes) {
@@ -191,7 +276,7 @@ class CreationService {
       }
     }
 
-    return {
+    const productData = {
       sku: sourceProduct.sku,
       name: sourceProduct.name,
       attribute_set_id: preparedData.attributeSet?.id || 4,
@@ -202,6 +287,13 @@ class CreationService {
       weight: sourceProduct.weight || 0,
       custom_attributes: customAttributes
     };
+
+    // Add website_ids if provided (for multi-store website assignment)
+    if (options.websiteIds && options.websiteIds.length > 0) {
+      productData.website_ids = options.websiteIds;
+    }
+
+    return productData;
   }
 
   async createConfigurableParent(extractedData, preparedData, options) {
@@ -231,6 +323,11 @@ class CreationService {
         weight: parent.weight || 0,
         custom_attributes: customAttributes
       };
+
+      // Add website_ids if provided (for multi-store website assignment)
+      if (options.websiteIds && options.websiteIds.length > 0) {
+        productData.website_ids = options.websiteIds;
+      }
 
       const createdProduct = await this.targetService.createProduct(productData);
 
