@@ -1,8 +1,10 @@
 const logger = require('../config/logger');
 const OrchestratorService = require('../services/migration/orchestrator.service');
+const ShopifyOrchestratorService = require('../services/migration/shopify-orchestrator.service');
 const { ValidationError } = require('../utils/error-handler');
 
 const orchestrator = new OrchestratorService();
+const shopifyOrchestrator = new ShopifyOrchestratorService();
 
 const migrateProduct = async (req, res, next) => {
   try {
@@ -85,7 +87,28 @@ const migrateProductsBatch = async (req, res, next) => {
   }
 };
 
+const migrateProductToShopify = async (req, res, next) => {
+  try {
+    const { sku, options = {} } = req.body;
+
+    if (!sku) {
+      throw new ValidationError('SKU is required', [{ field: 'sku', message: 'SKU cannot be empty' }]);
+    }
+
+    logger.info('Shopify migration request received', { sku, options });
+
+    const result = await shopifyOrchestrator.migrateProduct(sku, options);
+
+    const statusCode = result.success ? 200 : 207;
+
+    res.status(statusCode).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   migrateProduct,
-  migrateProductsBatch
+  migrateProductsBatch,
+  migrateProductToShopify
 };

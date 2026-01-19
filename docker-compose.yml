@@ -45,6 +45,12 @@ services:
       - GOOGLE_CHAT_WEBHOOK_URL=${GOOGLE_CHAT_WEBHOOK_URL}
       - GOOGLE_CHAT_TIMEOUT=${GOOGLE_CHAT_TIMEOUT}
 
+      # Shopify Configuration
+      - SHOPIFY_API_VERSION=${SHOPIFY_API_VERSION}
+      - SHOPIFY_DEFAULT_STORE=${SHOPIFY_DEFAULT_STORE}
+      - SHOPIFY_STORE_TEST_URL=${SHOPIFY_STORE_TEST_URL}
+      - SHOPIFY_STORE_TEST_TOKEN=${SHOPIFY_STORE_TEST_TOKEN}
+
     volumes:
       # Persist logs outside container
       - ./logs:/app/logs

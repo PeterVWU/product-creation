@@ -11,6 +11,7 @@ class MagentoClient {
     this.timeout = config.timeout || 30000;
     this.maxRetries = config.maxRetries || 3;
     this.retryDelay = config.retryDelay || 1000;
+    this.storeCode = config.storeCode || null;
 
     this.client = axios.create({
       baseURL: this.baseUrl,
@@ -90,23 +91,31 @@ class MagentoClient {
     );
   }
 
+  buildEndpoint(endpoint) {
+    if (!this.storeCode) {
+      return endpoint;
+    }
+    // Convert /rest/V1/... to /rest/{storeCode}/V1/...
+    return endpoint.replace(/^\/rest\/V1\//, `/rest/${this.storeCode}/V1/`);
+  }
+
   async get(endpoint, params = {}) {
-    const response = await this.client.get(endpoint, { params });
+    const response = await this.client.get(this.buildEndpoint(endpoint), { params });
     return response.data;
   }
 
   async post(endpoint, data = {}) {
-    const response = await this.client.post(endpoint, data);
+    const response = await this.client.post(this.buildEndpoint(endpoint), data);
     return response.data;
   }
 
   async put(endpoint, data = {}) {
-    const response = await this.client.put(endpoint, data);
+    const response = await this.client.put(this.buildEndpoint(endpoint), data);
     return response.data;
   }
 
   async delete(endpoint) {
-    const response = await this.client.delete(endpoint);
+    const response = await this.client.delete(this.buildEndpoint(endpoint));
     return response.data;
   }
 

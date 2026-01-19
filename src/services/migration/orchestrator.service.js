@@ -6,6 +6,7 @@ const ExtractionService = require('./extraction.service');
 const PreparationService = require('./preparation.service');
 const CreationService = require('./creation.service');
 const GoogleChatService = require('../notification/google-chat.service');
+const { validateStoreCodes, normalizeStoreCodes, mergeStoreResults } = require('../../utils/store-scope-helpers');
 
 class OrchestratorService {
   constructor() {
@@ -21,6 +22,14 @@ class OrchestratorService {
       config.api
     );
 
+    // Store target config for creating scoped services
+    this.targetConfig = {
+      baseUrl: config.target.baseUrl,
+      token: config.target.token,
+      apiConfig: config.api,
+      defaultStoreCodes: config.target.storeCodes
+    };
+
     this.extractionService = new ExtractionService(this.sourceService);
     this.preparationService = new PreparationService(this.targetService);
     this.creationService = new CreationService(this.sourceService, this.targetService);
@@ -30,11 +39,16 @@ class OrchestratorService {
   async migrateProduct(sku, options = {}) {
     const migrationStartTime = Date.now();
 
-    logger.info('Starting product migration', { sku, options });
+    // Determine target stores from options or config defaults
+    const targetStores = this.resolveTargetStores(options.targetStores);
+
+    logger.info('Starting product migration', { sku, options, targetStores });
 
     const migrationContext = {
       sku,
       success: false,
+      targetStores: targetStores.length > 0 ? targetStores : undefined,
+      storeResults: {},
       phases: {
         extraction: { success: false, duration: 0 },
         preparation: { success: false, duration: 0 },
@@ -44,7 +58,9 @@ class OrchestratorService {
         totalDuration: 0,
         childrenMigrated: 0,
         errorsCount: 0,
-        warningsCount: 0
+        warningsCount: 0,
+        storesSucceeded: 0,
+        storesFailed: 0
       },
       warnings: [],
       errors: []
@@ -70,20 +86,42 @@ class OrchestratorService {
 
       const preparedData = await this.executePreparationPhase(extractedData, migrationContext);
 
-      const creationResult = await this.executeCreationPhase(extractedData, preparedData, migrationOptions, migrationContext);
+      // Use multi-store creation if target stores are specified
+      if (targetStores.length > 0) {
+        const multiStoreResult = await this.executeMultiStoreCreationPhase(
+          extractedData,
+          preparedData,
+          migrationOptions,
+          targetStores,
+          migrationContext
+        );
 
-      migrationContext.productId = creationResult.parentProductId;
-      migrationContext.success = true;
+        migrationContext.productId = multiStoreResult.parentProductId;
+        migrationContext.storeResults = multiStoreResult.storeResults;
+
+        const storeSummary = mergeStoreResults(multiStoreResult.storeResults);
+        migrationContext.summary.storesSucceeded = storeSummary.storesSucceeded;
+        migrationContext.summary.storesFailed = storeSummary.storesFailed;
+        migrationContext.success = storeSummary.allSucceeded;
+      } else {
+        // Backward compatible: single store creation using default endpoint
+        const creationResult = await this.executeCreationPhase(extractedData, preparedData, migrationOptions, migrationContext);
+        migrationContext.productId = creationResult.parentProductId;
+        migrationContext.success = true;
+      }
 
       migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
       migrationContext.summary.childrenMigrated = migrationContext.phases.creation.childrenCreated || 0;
       migrationContext.summary.errorsCount = migrationContext.errors.length;
       migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-      logger.info('Product migration completed successfully', {
+      logger.info('Product migration completed', {
         sku,
+        success: migrationContext.success,
         duration: `${migrationContext.summary.totalDuration}ms`,
-        childrenMigrated: migrationContext.summary.childrenMigrated
+        childrenMigrated: migrationContext.summary.childrenMigrated,
+        storesSucceeded: migrationContext.summary.storesSucceeded,
+        storesFailed: migrationContext.summary.storesFailed
       });
 
       await this.googleChatService.notifyMigrationEnd(migrationContext);
@@ -111,6 +149,21 @@ class OrchestratorService {
 
       return migrationContext;
     }
+  }
+
+  resolveTargetStores(optionStores) {
+    // Runtime option takes precedence over config default
+    if (optionStores && Array.isArray(optionStores) && optionStores.length > 0) {
+      const validation = validateStoreCodes(optionStores);
+      if (!validation.valid) {
+        logger.warn('Invalid store codes provided, using empty list', { errors: validation.errors });
+        return [];
+      }
+      return normalizeStoreCodes(optionStores);
+    }
+
+    // Fall back to config default
+    return normalizeStoreCodes(this.targetConfig.defaultStoreCodes);
   }
 
   async executeExtractionPhase(sku, context) {
@@ -257,6 +310,106 @@ class OrchestratorService {
 
       throw error;
     }
+  }
+
+  async executeMultiStoreCreationPhase(extractedData, preparedData, options, targetStores, context) {
+    const phaseStartTime = Date.now();
+    const storeResults = {};
+    let parentProductId = null;
+    let imagesUploaded = false;
+
+    logger.info('Executing multi-store creation phase', {
+      sku: extractedData.parent.sku,
+      targetStores
+    });
+
+    for (const storeCode of targetStores) {
+      logger.info('Creating product for store', { sku: extractedData.parent.sku, storeCode });
+
+      try {
+        // Create scoped services for this store
+        const scopedTargetService = this.targetService.createScopedInstance(storeCode);
+        const scopedCreationService = new CreationService(this.sourceService, scopedTargetService);
+
+        // Only include images for the first store (images are shared across stores in Magento)
+        const storeOptions = {
+          ...options,
+          includeImages: options.includeImages && !imagesUploaded
+        };
+
+        const creationResult = await scopedCreationService.createProducts(
+          extractedData,
+          preparedData,
+          storeOptions
+        );
+
+        // Track if images were uploaded (only do this once)
+        if (storeOptions.includeImages && creationResult.imagesUploaded > 0) {
+          imagesUploaded = true;
+        }
+
+        // Use productId from first successful store
+        if (!parentProductId && creationResult.parentProductId) {
+          parentProductId = creationResult.parentProductId;
+        }
+
+        storeResults[storeCode] = {
+          success: true,
+          productId: creationResult.parentProductId,
+          childrenCreated: creationResult.createdChildren.filter(c => c.success).length,
+          imagesUploaded: creationResult.imagesUploaded || 0
+        };
+
+        // Update context with creation phase info (aggregate across stores)
+        context.phases.creation.childrenCreated = (context.phases.creation.childrenCreated || 0) +
+          storeResults[storeCode].childrenCreated;
+        context.phases.creation.imagesUploaded = (context.phases.creation.imagesUploaded || 0) +
+          storeResults[storeCode].imagesUploaded;
+
+        if (creationResult.warnings && creationResult.warnings.length > 0) {
+          context.warnings.push(...creationResult.warnings.map(w => ({ ...w, storeCode })));
+        }
+
+        logger.info('Store creation successful', { sku: extractedData.parent.sku, storeCode });
+      } catch (error) {
+        logger.error('Store creation failed', {
+          sku: extractedData.parent.sku,
+          storeCode,
+          error: error.message
+        });
+
+        storeResults[storeCode] = {
+          success: false,
+          error: error.message
+        };
+
+        context.errors.push({
+          phase: 'creation',
+          storeCode,
+          message: error.message,
+          details: error.details || error.stack
+        });
+
+        // Check if we should continue to next store on error
+        if (!config.errorHandling.continueOnError) {
+          throw error;
+        }
+      }
+    }
+
+    context.phases.creation.success = Object.values(storeResults).some(r => r.success);
+    context.phases.creation.duration = Date.now() - phaseStartTime;
+
+    logger.info('Multi-store creation phase completed', {
+      sku: extractedData.parent.sku,
+      duration: `${context.phases.creation.duration}ms`,
+      storeResults: Object.keys(storeResults).map(s => ({ store: s, success: storeResults[s].success }))
+    });
+
+    return {
+      parentProductId,
+      storeResults
+    };
   }
 
   async testConnections() {

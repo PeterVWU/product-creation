@@ -53,11 +53,22 @@ class ImageProcessingError extends Error {
   }
 }
 
+class ShopifyAPIError extends Error {
+  constructor(message, statusCode = 500, details = null) {
+    super(message);
+    this.name = 'ShopifyAPIError';
+    this.statusCode = statusCode;
+    this.details = details;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
 module.exports = {
   MagentoAPIError,
   ExtractionError,
   PreparationError,
   CreationError,
   ValidationError,
-  ImageProcessingError
+  ImageProcessingError,
+  ShopifyAPIError
 };

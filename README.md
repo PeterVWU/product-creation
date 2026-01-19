@@ -1,6 +1,6 @@
 # Magento Product Migration API
 
-A Node.js REST API server for migrating configurable products from a source Magento instance to a target Magento instance.
+A Node.js REST API server for migrating configurable products from a source Magento instance to target platforms (Magento or Shopify).
 
 ## Features
 
@@ -10,6 +10,8 @@ A Node.js REST API server for migrating configurable products from a source Mage
 - Comprehensive error handling and logging
 - Continue-on-error pattern (doesn't stop on non-critical errors)
 - Support for batch migrations
+- **Multi-store scope support** - migrate products to multiple Magento store views in a single operation
+- **Shopify migration support** - migrate Magento products to Shopify stores using GraphQL Admin API
 - Health check endpoints
 - Real-time Google Chat notifications for migration status
 
@@ -122,6 +124,7 @@ Key environment variables:
 - `SOURCE_MAGENTO_TOKEN` - Source Magento API token
 - `TARGET_MAGENTO_BASE_URL` - Target Magento instance URL
 - `TARGET_MAGENTO_TOKEN` - Target Magento API token
+- `TARGET_STORE_CODES` - Comma-separated list of target store codes (optional)
 - `PORT` - Server port (default: 3000)
 - `LOG_LEVEL` - Logging level (default: info)
 
@@ -246,7 +249,8 @@ Migrate a single configurable product from source to target.
   "options": {
     "includeImages": true,
     "createMissingAttributes": true,
-    "overwriteExisting": false
+    "overwriteExisting": false,
+    "targetStores": ["default", "misthub"]
   }
 }
 ```
@@ -257,12 +261,28 @@ Migrate a single configurable product from source to target.
   - `includeImages` (boolean, default: true): Whether to migrate product images
   - `createMissingAttributes` (boolean, default: true): Create missing attribute options in target
   - `overwriteExisting` (boolean, default: false): Overwrite existing products
+  - `targetStores` (array of strings): Target store codes to migrate to (e.g., `["default", "misthub"]`). If omitted, uses `TARGET_STORE_CODES` env var or default endpoint
 
 **Response (Success - 200):**
 ```json
 {
   "success": true,
   "sku": "TEST-ABC",
+  "targetStores": ["default", "misthub"],
+  "storeResults": {
+    "default": {
+      "success": true,
+      "productId": 12345,
+      "childrenCreated": 6,
+      "imagesUploaded": 12
+    },
+    "misthub": {
+      "success": true,
+      "productId": 12345,
+      "childrenCreated": 6,
+      "imagesUploaded": 0
+    }
+  },
   "phases": {
     "extraction": {
       "success": true,
@@ -286,7 +306,9 @@ Migrate a single configurable product from source to target.
     "totalDuration": 15820,
     "childrenMigrated": 6,
     "errorsCount": 0,
-    "warningsCount": 1
+    "warningsCount": 1,
+    "storesSucceeded": 2,
+    "storesFailed": 0
   },
   "warnings": [
     "Attribute 'custom_field' not found in target, skipped"
@@ -339,7 +361,8 @@ Migrate multiple configurable products sequentially.
   "skus": ["SKU-001", "SKU-002", "SKU-003"],
   "options": {
     "includeImages": true,
-    "createMissingAttributes": true
+    "createMissingAttributes": true,
+    "targetStores": ["default", "misthub"]
   }
 }
 ```
@@ -442,6 +465,246 @@ curl -X POST http://localhost:3000/api/v1/migrate/products/batch \
   }'
 ```
 
+## Shopify Migration
+
+The API supports migrating Magento configurable products to Shopify stores using the Shopify GraphQL Admin API.
+
+### How It Works
+
+Magento configurable products are transformed to Shopify products:
+- Magento parent product → Shopify product
+- Magento simple children → Shopify variants
+- Configurable attributes (color, size) → Shopify product options
+
+### Configuration
+
+**Environment Variables:**
+
+```env
+# Default Shopify store (optional)
+SHOPIFY_STORE_URL=mystore.myshopify.com
+SHOPIFY_ACCESS_TOKEN=shpat_xxxxx
+
+# Multiple stores via JSON (optional)
+SHOPIFY_STORES={"store1": {"url": "store1.myshopify.com", "token": "shpat_xxx"}, "store2": {"url": "store2.myshopify.com", "token": "shpat_yyy"}}
+
+# API version (optional, defaults to 2025-01)
+SHOPIFY_API_VERSION=2025-01
+```
+
+### Shopify Health Check
+
+**GET** `/api/v1/health/shopify`
+
+Test connection to Shopify store.
+
+**Query Parameters:**
+- `store` (optional): Name of the store from `SHOPIFY_STORES` config
+
+```bash
+# Test default store
+curl http://localhost:3000/api/v1/health/shopify
+
+# Test specific store
+curl http://localhost:3000/api/v1/health/shopify?store=store1
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-01-19T10:30:00Z",
+  "connection": {
+    "connected": true,
+    "shopDomain": "mystore.myshopify.com",
+    "shopName": "My Store",
+    "shopUrl": "https://mystore.myshopify.com",
+    "error": null
+  }
+}
+```
+
+### Migrate Product to Shopify
+
+**POST** `/api/v1/migrate/product/shopify`
+
+Migrate a Magento configurable product to Shopify.
+
+**Request Body:**
+```json
+{
+  "sku": "MAGENTO-SKU-123",
+  "options": {
+    "includeImages": true,
+    "shopifyStore": "store1"
+  }
+}
+```
+
+**Parameters:**
+- `sku` (required): The SKU of the Magento configurable product to migrate
+- `options` (optional):
+  - `includeImages` (boolean, default: from config): Whether to migrate product images
+  - `shopifyStore` (string): Name of the target Shopify store from `SHOPIFY_STORES` config
+
+**Response (Success - 200):**
+```json
+{
+  "sku": "MAGENTO-SKU-123",
+  "success": true,
+  "targetPlatform": "shopify",
+  "shopifyStore": "store1",
+  "shopifyProductId": "gid://shopify/Product/123456",
+  "shopifyProductUrl": "https://store1.myshopify.com/admin/products/123456",
+  "phases": {
+    "extraction": {
+      "success": true,
+      "duration": 2340,
+      "childrenFound": 6
+    },
+    "creation": {
+      "success": true,
+      "duration": 5200,
+      "variantsCreated": 6,
+      "imagesUploaded": 12
+    }
+  },
+  "summary": {
+    "totalDuration": 7540,
+    "variantsMigrated": 6,
+    "imagesUploaded": 12,
+    "errorsCount": 0,
+    "warningsCount": 0
+  },
+  "warnings": [],
+  "errors": []
+}
+```
+
+### Data Mapping
+
+| Magento Field | Shopify Field |
+|---------------|---------------|
+| `parent.name` | `product.title` |
+| `parent.description` | `product.descriptionHtml` |
+| `parent.sku` | `product.handle` (slugified) |
+| `child.sku` | `variant.sku` |
+| `child.price` | `variant.price` |
+| `child.weight` | `variant.weight` |
+| Configurable options | `product.options` |
+| `media_gallery_entries` | `product.media` |
+
+### Shopify API Considerations
+
+1. **Rate Limiting**: Shopify uses cost-based throttling (~1000 points/second). The client handles retry-after headers automatically.
+
+2. **Variant Limits**: Shopify allows max 100 variants per product and 3 options (e.g., color, size, material).
+
+3. **Image Upload**: Images are uploaded via URL from the source Magento media directory.
+
+4. **Product Status**: Products are created in DRAFT status, then published automatically.
+
+### Example: Shopify Migration
+
+```bash
+curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "TEST-ABC",
+    "options": {
+      "includeImages": true,
+      "shopifyStore": "mystore"
+    }
+  }'
+```
+
+## Multi-Store Migration
+
+The API supports migrating products to multiple Magento store views in a single operation. This is useful when you need to create store-specific product data.
+
+### How It Works
+
+Magento supports store-scoped API calls using the format `/rest/{storeCode}/V1/products`. When you specify target stores, the API:
+
+1. Extracts product data from the source (once)
+2. Prepares attribute mappings (once)
+3. Creates products in each target store sequentially
+4. Uploads images only once (images are shared across stores in Magento)
+
+### Store Code Configuration
+
+**Option 1: Per-request (recommended for flexibility)**
+```json
+{
+  "sku": "TEST-ABC",
+  "options": {
+    "targetStores": ["default", "misthub", "ejuices"]
+  }
+}
+```
+
+**Option 2: Environment variable (for consistent defaults)**
+```env
+TARGET_STORE_CODES=default,misthub,ejuices
+```
+
+If both are provided, the per-request `targetStores` takes precedence.
+
+### Finding Available Store Codes
+
+Query your target Magento instance to get available store codes:
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  https://your-magento.com/rest/V1/store/storeViews
+```
+
+Response will include store codes like:
+```json
+[
+  {"id": 1, "code": "default", "name": "Default Store View"},
+  {"id": 8, "code": "misthub", "name": "Misthub"}
+]
+```
+
+Use the `code` field value (e.g., `default`, `misthub`) in your `targetStores` array.
+
+### Example: Multi-Store Migration
+
+```bash
+curl -X POST http://localhost:3000/api/v1/migrate/product \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "TEST-ABC",
+    "options": {
+      "includeImages": true,
+      "targetStores": ["default", "misthub"]
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "sku": "TEST-ABC",
+  "targetStores": ["default", "misthub"],
+  "storeResults": {
+    "default": {"success": true, "productId": 12345, "childrenCreated": 4, "imagesUploaded": 5},
+    "misthub": {"success": true, "productId": 12345, "childrenCreated": 4, "imagesUploaded": 0}
+  },
+  "summary": {
+    "storesSucceeded": 2,
+    "storesFailed": 0
+  }
+}
+```
+
+### Notes
+
+- **Backward compatible**: If no `targetStores` and no `TARGET_STORE_CODES` env var, the API uses the default Magento endpoint (`/rest/V1/products`)
+- **Images**: Uploaded only once per product (to the first store), as they're shared across stores in Magento
+- **Error handling**: Per-store failures are tracked individually; migration continues to remaining stores if `CONTINUE_ON_ERROR=true`
+
 ## Logging
 
 Logs are stored in the `logs/` directory:
@@ -469,6 +732,7 @@ SOURCE_MAGENTO_TOKEN=your_token
 # Target Magento
 TARGET_MAGENTO_BASE_URL=https://target.magento.com
 TARGET_MAGENTO_TOKEN=your_token
+TARGET_STORE_CODES=default,misthub,ejuices  # Optional: comma-separated list of target store codes
 
 # API Settings
 API_TIMEOUT=30000
@@ -591,17 +855,27 @@ src/
 ├── routes/          # API routes
 ├── services/
 │   ├── magento/     # Magento API clients
+│   ├── shopify/     # Shopify GraphQL API clients
 │   └── migration/   # Migration services (extraction, preparation, creation)
 └── utils/           # Utility functions and helpers
 ```
 
 ## Key Services
 
+### Magento Services
 - **MagentoClient**: Base HTTP client with retry logic
 - **SourceService**: Operations for source Magento
 - **TargetService**: Operations for target Magento
-- **ExtractionService**: Phase 1 - Extract data from source
-- **PreparationService**: Phase 2 - Prepare target with attribute mappings
-- **CreationService**: Phase 3 - Create products in target
+
+### Shopify Services
+- **ShopifyClient**: Base GraphQL client for Shopify Admin API with rate limiting
+- **ShopifyTargetService**: Product/variant/image operations for Shopify
+
+### Migration Services
+- **ExtractionService**: Phase 1 - Extract data from source Magento
+- **PreparationService**: Phase 2 - Prepare Magento target with attribute mappings
+- **CreationService**: Phase 3 - Create products in Magento target
+- **ShopifyCreationService**: Transform Magento data and create products in Shopify
+- **OrchestratorService**: Coordinates Magento→Magento migration phases
+- **ShopifyOrchestratorService**: Coordinates Magento→Shopify migration phases
 - **ImageService**: Download and upload images
-- **OrchestratorService**: Coordinates all migration phases

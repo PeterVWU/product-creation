@@ -1,5 +1,37 @@
 require('dotenv').config();
 
+/**
+ * Parse Shopify store configurations from environment variables.
+ * Supports prefix-based naming: SHOPIFY_STORE_<NAME>_URL and SHOPIFY_STORE_<NAME>_TOKEN
+ *
+ * Example:
+ *   SHOPIFY_STORE_WHOLESALE_URL=wholesale-store.myshopify.com
+ *   SHOPIFY_STORE_WHOLESALE_TOKEN=shpat_xxxxxxxxxxxxx
+ *
+ * Results in: { wholesale: { url: '...', token: '...' } }
+ */
+function parseShopifyStores() {
+  const stores = {};
+  const storePattern = /^SHOPIFY_STORE_([A-Z0-9_]+)_URL$/;
+
+  for (const [key, value] of Object.entries(process.env)) {
+    const match = key.match(storePattern);
+    if (match) {
+      const storeName = match[1].toLowerCase();
+      const tokenKey = `SHOPIFY_STORE_${match[1]}_TOKEN`;
+
+      if (process.env[tokenKey]) {
+        stores[storeName] = {
+          url: value,
+          token: process.env[tokenKey]
+        };
+      }
+    }
+  }
+
+  return stores;
+}
+
 const config = {
   server: {
     port: parseInt(process.env.PORT, 10) || 3000,
@@ -14,7 +46,8 @@ const config = {
   target: {
     baseUrl: process.env.TARGET_MAGENTO_BASE_URL,
     token: process.env.TARGET_MAGENTO_TOKEN,
-    adminPath: process.env.TARGET_MAGENTO_ADMIN_PATH || 'admin'
+    adminPath: process.env.TARGET_MAGENTO_ADMIN_PATH || 'admin',
+    storeCodes: process.env.TARGET_STORE_CODES?.split(',').map(s => s.trim()).filter(Boolean) || []
   },
 
   api: {
@@ -44,6 +77,12 @@ const config = {
       webhookUrl: process.env.GOOGLE_CHAT_WEBHOOK_URL,
       timeout: parseInt(process.env.GOOGLE_CHAT_TIMEOUT, 10) || 5000
     }
+  },
+
+  shopify: {
+    apiVersion: process.env.SHOPIFY_API_VERSION || '2025-01',
+    defaultStore: process.env.SHOPIFY_DEFAULT_STORE || null,
+    stores: parseShopifyStores()
   }
 };
 

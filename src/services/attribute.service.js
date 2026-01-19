@@ -45,6 +45,15 @@ class AttributeService {
             const attributeOptions = await this.sourceService.getAttributeOptions(attribute.attribute_code);
 
             for (const value of option.values) {
+              // Skip if value_index is null/undefined
+              if (value.value_index == null) {
+                logger.debug('Skipping option value with null value_index', {
+                  attributeId: option.attribute_id,
+                  attributeCode: attribute.attribute_code
+                });
+                continue;
+              }
+
               const optionData = attributeOptions.find(
                 opt => opt.value === value.value_index.toString()
               );

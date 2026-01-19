@@ -5,6 +5,15 @@ const { buildProductPayload } = require('../../utils/helpers');
 class TargetService extends MagentoClient {
   constructor(baseUrl, token, config = {}) {
     super(baseUrl, token, config);
+    // Store constructor parameters for creating scoped instances
+    this._baseUrl = baseUrl;
+    this._token = token;
+    this._config = config;
+  }
+
+  createScopedInstance(storeCode) {
+    const scopedConfig = { ...this._config, storeCode };
+    return new TargetService(this._baseUrl, this._token, scopedConfig);
   }
 
   async createProduct(productData) {

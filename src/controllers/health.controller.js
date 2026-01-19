@@ -1,7 +1,9 @@
 const logger = require('../config/logger');
 const OrchestratorService = require('../services/migration/orchestrator.service');
+const ShopifyOrchestratorService = require('../services/migration/shopify-orchestrator.service');
 
 const orchestrator = new OrchestratorService();
+const shopifyOrchestrator = new ShopifyOrchestratorService();
 
 const healthCheck = async (req, res) => {
   res.status(200).json({
@@ -41,7 +43,32 @@ const magentoHealthCheck = async (req, res, next) => {
   }
 };
 
+const shopifyHealthCheck = async (req, res, next) => {
+  try {
+    const storeName = req.query.store || null;
+
+    logger.info('Testing Shopify connection', { storeName });
+
+    const connection = await shopifyOrchestrator.testShopifyConnection(storeName);
+
+    res.status(connection.connected ? 200 : 503).json({
+      status: connection.connected ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      connection: {
+        connected: connection.connected,
+        shopDomain: connection.shopDomain,
+        shopName: connection.shopName || null,
+        shopUrl: connection.shopUrl || null,
+        error: connection.error || null
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   healthCheck,
-  magentoHealthCheck
+  magentoHealthCheck,
+  shopifyHealthCheck
 };
