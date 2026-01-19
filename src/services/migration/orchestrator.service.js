@@ -82,7 +82,7 @@ class OrchestratorService {
       const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
       const childSkus = extractedData.children.map(child => child.sku);
-      await this.googleChatService.notifyMigrationStart(sku, childSkus);
+      await this.googleChatService.notifyMigrationStart(sku, childSkus, targetStores);
 
       const preparedData = await this.executePreparationPhase(extractedData, migrationContext);
 

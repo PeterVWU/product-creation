@@ -53,10 +53,31 @@ class GoogleChatService {
     }
   }
 
-  async notifyMigrationStart(parentSku, childSkus = []) {
+  async notifyMigrationStart(parentSku, childSkus = [], targetStores = []) {
     const childSkuList = childSkus.length > 0
       ? childSkus.join(', ')
       : 'None';
+
+    const widgets = [
+      {
+        decoratedText: {
+          text: `<b>Parent SKU:</b> ${parentSku}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Child SKUs (${childSkus.length}):</b> ${childSkuList}`
+        }
+      }
+    ];
+
+    if (targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+    }
 
     const card = {
       cardsV2: [{
@@ -64,18 +85,7 @@ class GoogleChatService {
         card: {
           sections: [{
             header: '🚀 Product Migration Started',
-            widgets: [
-              {
-                decoratedText: {
-                  text: `<b>Parent SKU:</b> ${parentSku}`
-                }
-              },
-              {
-                decoratedText: {
-                  text: `<b>Child SKUs (${childSkus.length}):</b> ${childSkuList}`
-                }
-              }
-            ]
+            widgets
           }]
         }
       }]
@@ -85,7 +95,7 @@ class GoogleChatService {
   }
 
   async notifyMigrationEnd(migrationContext) {
-    const { sku, success, summary, errors, productId } = migrationContext;
+    const { sku, success, summary, errors, productId, targetStores, storeResults, shopifyProductUrl } = migrationContext;
 
     const statusText = success ? 'Completed Successfully' : 'Failed';
     const sectionHeader = success ? '✅ Migration Completed' : '❌ Migration Failed';
@@ -125,6 +135,20 @@ class GoogleChatService {
       });
     }
 
+    if (targetStores && targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+
+      widgets.push({
+        decoratedText: {
+          text: `<b>Stores:</b> ${summary.storesSucceeded}/${targetStores.length} succeeded`
+        }
+      });
+    }
+
     if (productId) {
       widgets.push({
         buttonList: {
@@ -134,6 +158,22 @@ class GoogleChatService {
             onClick: {
               openLink: {
                 url: this.buildProductAdminUrl(productId)
+              }
+            }
+          }]
+        }
+      });
+    }
+
+    if (shopifyProductUrl) {
+      widgets.push({
+        buttonList: {
+          buttons: [{
+            text: 'View Product in Shopify',
+            type: 'OUTLINED',
+            onClick: {
+              openLink: {
+                url: shopifyProductUrl
               }
             }
           }]

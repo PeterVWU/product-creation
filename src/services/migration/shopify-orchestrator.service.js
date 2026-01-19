@@ -86,7 +86,7 @@ class ShopifyOrchestratorService {
       const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
       const childSkus = extractedData.children.map(child => child.sku);
-      await this.googleChatService.notifyMigrationStart(sku, childSkus, 'shopify');
+      await this.googleChatService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
 
       // Phase 2: Create in Shopify (no preparation phase needed)
       const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
