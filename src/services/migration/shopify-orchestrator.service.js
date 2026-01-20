@@ -91,6 +91,73 @@ class ShopifyOrchestratorService {
 
       // Phase 2: Create in Shopify (no preparation phase needed)
       const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
+      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService);
+
+      // Auto-detect if product already exists on Shopify
+      const handle = creationService.slugify(extractedData.parent.sku);
+      const existingProduct = await shopifyTargetService.getProductVariants(handle);
+      const hasChildren = extractedData.children && extractedData.children.length > 0;
+
+      if (existingProduct && hasChildren) {
+        // Product exists - check for missing variants
+        const existingSkus = existingProduct.variants.map(v => v.sku).filter(Boolean);
+        const missingChildren = extractedData.children.filter(c => !existingSkus.includes(c.sku));
+
+        logger.info('Auto-detected existing Shopify product', {
+          sku,
+          handle,
+          existingVariants: existingSkus.length,
+          sourceVariants: extractedData.children.length,
+          missingVariants: missingChildren.length
+        });
+
+        if (missingChildren.length === 0) {
+          // All variants exist - return early with no-action mode
+          migrationContext.success = true;
+          migrationContext.shopifyProductId = existingProduct.productId;
+          migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
+          migrationContext.phases.creation.success = true;
+          migrationContext.phases.creation.mode = 'no-action';
+          migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+          migrationContext.summary.message = 'All variants already exist on Shopify';
+
+          logger.info('All variants already exist on Shopify, skipping migration', { sku, handle });
+          await this.googleChatService.notifyMigrationEnd(migrationContext);
+          return migrationContext;
+        }
+
+        // Sync missing variants only
+        const syncResult = await this.executeVariantSyncPhase(
+          extractedData,
+          creationService,
+          existingProduct.productId,
+          existingSkus,
+          migrationOptions,
+          migrationContext
+        );
+
+        migrationContext.shopifyProductId = existingProduct.productId;
+        migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
+        migrationContext.success = syncResult.success;
+
+        migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+        migrationContext.summary.variantsMigrated = syncResult.variantsCreated || 0;
+        migrationContext.summary.imagesUploaded = syncResult.imagesUploaded || 0;
+        migrationContext.summary.errorsCount = migrationContext.errors.length;
+        migrationContext.summary.warningsCount = migrationContext.warnings.length;
+
+        logger.info('Shopify variant sync completed', {
+          sku,
+          success: migrationContext.success,
+          duration: `${migrationContext.summary.totalDuration}ms`,
+          variantsMigrated: migrationContext.summary.variantsMigrated
+        });
+
+        await this.googleChatService.notifyMigrationEnd(migrationContext);
+        return migrationContext;
+      }
+
+      // Product doesn't exist or has no children - perform full migration
       const creationResult = await this.executeCreationPhase(
         extractedData,
         shopifyTargetService,
@@ -221,6 +288,65 @@ class ShopifyOrchestratorService {
       });
 
       logger.error('Shopify creation phase failed', {
+        error: error.message,
+        duration: `${context.phases.creation.duration}ms`
+      });
+
+      throw error;
+    }
+  }
+
+  async executeVariantSyncPhase(extractedData, creationService, existingProductId, existingSkus, options, context) {
+    const phaseStartTime = Date.now();
+
+    try {
+      logger.info('Executing Shopify variant sync phase', {
+        parentSku: extractedData.parent.sku,
+        existingProductId,
+        existingVariants: existingSkus.length
+      });
+
+      const syncResult = await creationService.syncMissingVariants(
+        extractedData,
+        existingProductId,
+        existingSkus,
+        options
+      );
+
+      context.phases.creation.success = syncResult.success;
+      context.phases.creation.mode = 'variant-sync';
+      context.phases.creation.duration = Date.now() - phaseStartTime;
+      context.phases.creation.variantsCreated = syncResult.variantsCreated;
+      context.phases.creation.variantsSkipped = syncResult.variantsSkipped;
+      context.phases.creation.imagesUploaded = syncResult.imagesUploaded || 0;
+
+      if (syncResult.warnings && syncResult.warnings.length > 0) {
+        context.warnings.push(...syncResult.warnings);
+      }
+
+      if (syncResult.errors && syncResult.errors.length > 0) {
+        context.errors.push(...syncResult.errors);
+      }
+
+      logger.info('Shopify variant sync phase successful', {
+        duration: `${context.phases.creation.duration}ms`,
+        variantsCreated: context.phases.creation.variantsCreated,
+        variantsSkipped: context.phases.creation.variantsSkipped
+      });
+
+      return syncResult;
+    } catch (error) {
+      context.phases.creation.success = false;
+      context.phases.creation.mode = 'variant-sync';
+      context.phases.creation.duration = Date.now() - phaseStartTime;
+
+      context.errors.push({
+        phase: 'variant-sync',
+        message: error.message,
+        details: error.details || error.stack
+      });
+
+      logger.error('Shopify variant sync phase failed', {
         error: error.message,
         duration: `${context.phases.creation.duration}ms`
       });

@@ -391,6 +391,22 @@ class ShopifyTargetService extends ShopifyClient {
     }
   }
 
+  async getProductVariants(handle) {
+    logger.debug('Fetching product variants', { handle });
+
+    const product = await this.getProductByHandle(handle);
+    if (!product) return null;
+
+    return {
+      productId: product.id,
+      variants: product.variants?.edges?.map(e => ({
+        id: e.node.id,
+        sku: e.node.sku,
+        price: e.node.price
+      })) || []
+    };
+  }
+
   async publishProduct(productId) {
     logger.info('Publishing product in Shopify', { productId });
 

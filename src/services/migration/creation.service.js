@@ -166,6 +166,105 @@ class CreationService {
     }
   }
 
+  /**
+   * Sync only missing variants to an existing configurable product.
+   * Creates new simple products for children that don't exist on the target,
+   * then links them to the existing parent.
+   */
+  async syncMissingVariants(extractedData, preparedData, existingChildSkus, options = {}) {
+    const startTime = Date.now();
+    const parentSku = extractedData.parent.sku;
+
+    logger.info('Syncing missing variants', {
+      parentSku,
+      sourceChildren: extractedData.children.length,
+      existingChildren: existingChildSkus.length
+    });
+
+    // Filter children to only new ones
+    const newChildren = extractedData.children.filter(c => !existingChildSkus.includes(c.sku));
+    const skippedChildren = extractedData.children.filter(c => existingChildSkus.includes(c.sku));
+
+    const result = {
+      success: false,
+      mode: 'variant-sync',
+      parentSku,
+      childrenCreated: 0,
+      childrenSkipped: skippedChildren.length,
+      createdChildren: [],
+      skippedChildren: skippedChildren.map(c => ({ sku: c.sku, reason: 'already_exists' })),
+      imagesUploaded: 0,
+      errors: [],
+      warnings: []
+    };
+
+    if (newChildren.length === 0) {
+      logger.info('No new variants to sync', { parentSku });
+      result.success = true;
+      return result;
+    }
+
+    try {
+      // Create filtered data objects for the new children only
+      const filteredExtractedData = {
+        ...extractedData,
+        children: newChildren,
+        childLinks: extractedData.childLinks?.filter(link =>
+          typeof link === 'object'
+            ? !existingChildSkus.includes(link.sku)
+            : !existingChildSkus.includes(link)
+        ),
+        images: {
+          parent: [], // Don't re-upload parent images
+          children: Object.fromEntries(
+            Object.entries(extractedData.images?.children || {})
+              .filter(([sku]) => !existingChildSkus.includes(sku))
+          )
+        }
+      };
+
+      const filteredPreparedData = {
+        ...preparedData,
+        children: preparedData.children?.filter(c => !existingChildSkus.includes(c.sku))
+      };
+
+      // Create only new simple products
+      const childResults = await this.createSimpleProducts(
+        filteredExtractedData,
+        filteredPreparedData,
+        options
+      );
+
+      result.createdChildren = childResults;
+      result.childrenCreated = childResults.filter(c => c.success).length;
+      result.imagesUploaded = childResults.reduce((sum, c) => sum + (c.imagesUploaded || 0), 0);
+
+      // Link new children to existing parent
+      await this.linkChildren(parentSku, childResults);
+
+      result.success = true;
+
+      const duration = Date.now() - startTime;
+      logger.info('Variant sync completed', {
+        parentSku,
+        childrenCreated: result.childrenCreated,
+        childrenSkipped: result.childrenSkipped,
+        imagesUploaded: result.imagesUploaded,
+        duration: `${duration}ms`
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Variant sync failed', { parentSku, error: error.message });
+      result.errors.push({
+        phase: 'variant-sync',
+        message: error.message,
+        details: error.details || error.stack
+      });
+      throw new CreationError(error.message, result);
+    }
+  }
+
   async createSimpleProducts(extractedData, preparedData, options) {
     logger.info('Creating simple products', { count: extractedData.children.length });
 

@@ -31,6 +31,16 @@ class TargetService extends MagentoClient {
     }
   }
 
+  async getConfigurableChildren(parentSku) {
+    logger.debug('Fetching configurable children', { parentSku });
+    try {
+      return await this.get(`/rest/V1/configurable-products/${encodeURIComponent(parentSku)}/children`);
+    } catch (error) {
+      logger.warn('Failed to fetch configurable children', { parentSku, error: error.message });
+      return [];
+    }
+  }
+
   async updateProduct(sku, productData) {
     logger.info('Updating product in target', { sku });
     const payload = buildProductPayload(productData);

@@ -125,6 +125,117 @@ class ShopifyCreationService {
     }
   }
 
+  /**
+   * Sync only missing variants to an existing Shopify product.
+   * Creates new variants for children that don't exist on the target product.
+   */
+  async syncMissingVariants(extractedData, existingProductId, existingVariantSkus, options = {}) {
+    const startTime = Date.now();
+    const { parent, children, translations, images } = extractedData;
+
+    logger.info('Syncing missing Shopify variants', {
+      parentSku: parent.sku,
+      existingProductId,
+      sourceChildren: children.length,
+      existingVariants: existingVariantSkus.length
+    });
+
+    // Filter to only new variants
+    const newChildren = children.filter(c => !existingVariantSkus.includes(c.sku));
+    const skippedChildren = children.filter(c => existingVariantSkus.includes(c.sku));
+
+    const result = {
+      success: false,
+      mode: 'variant-sync',
+      variantsCreated: 0,
+      variantsSkipped: skippedChildren.length,
+      imagesUploaded: 0,
+      createdVariants: [],
+      skippedVariants: skippedChildren.map(c => ({ sku: c.sku, reason: 'already_exists' })),
+      errors: [],
+      warnings: []
+    };
+
+    if (newChildren.length === 0) {
+      logger.info('No new variants to sync', { parentSku: parent.sku });
+      result.success = true;
+      return result;
+    }
+
+    try {
+      // Build and upload images for new variants only
+      let fileIds = [];
+      let skuToFileIndex = {};
+
+      if (options.includeImages && images) {
+        // Filter images to only include new children
+        const filteredImages = {
+          parent: [], // Don't re-upload parent images
+          children: Object.fromEntries(
+            Object.entries(images.children || {})
+              .filter(([sku]) => !existingVariantSkus.includes(sku))
+          )
+        };
+
+        const { inputs, skuToFileIndex: mapping } = this.buildImageInputs(filteredImages, parent, newChildren);
+        skuToFileIndex = mapping;
+
+        if (inputs.length > 0) {
+          logger.info('Uploading images for new variants', { count: inputs.length });
+          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(inputs);
+          logger.info('Images uploaded and ready', { count: fileIds.filter(f => f !== null).length });
+        }
+      }
+
+      // Build variant data for new children only
+      const variants = this.buildVariantsForSet(newChildren, translations, fileIds, skuToFileIndex);
+
+      logger.info('Creating new variants in Shopify', {
+        productId: existingProductId,
+        variantCount: variants.length
+      });
+
+      // Create new variants using the existing createProductVariants method
+      const createdVariants = await this.shopifyTargetService.createProductVariants(
+        existingProductId,
+        variants
+      );
+
+      result.createdVariants = createdVariants.map(v => ({
+        id: v.id,
+        sku: v.inventoryItem?.sku || v.sku,
+        success: true
+      }));
+      result.variantsCreated = result.createdVariants.length;
+      result.imagesUploaded = fileIds.filter(f => f !== null).length;
+      result.success = true;
+
+      const duration = Date.now() - startTime;
+      logger.info('Shopify variant sync completed', {
+        parentSku: parent.sku,
+        variantsCreated: result.variantsCreated,
+        variantsSkipped: result.variantsSkipped,
+        imagesUploaded: result.imagesUploaded,
+        duration: `${duration}ms`
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Shopify variant sync failed', {
+        parentSku: parent.sku,
+        error: error.message
+      });
+
+      result.errors.push({
+        phase: 'variant-sync',
+        message: error.message,
+        details: error.details || error.stack
+      });
+
+      throw new CreationError(`Failed to sync Shopify variants: ${error.message}`, result);
+    }
+  }
+
   buildShopifyProduct(magentoParent, children, translations, status = 'DRAFT') {
     const handle = this.slugify(magentoParent.sku);
 
