@@ -13,7 +13,8 @@ A Node.js REST API server for migrating configurable products from a source Mage
 - **Multi-store scope support** - migrate products to multiple Magento store views in a single operation
 - **Shopify migration support** - migrate Magento products to Shopify stores using GraphQL Admin API
 - Health check endpoints
-- Real-time Google Chat notifications for migration status
+- Real-time Google Chat notifications for migration and price sync status
+- **Price synchronization** - sync prices from source to target Magento stores and Shopify
 
 ## Prerequisites
 
@@ -389,6 +390,93 @@ Migrate multiple configurable products sequentially.
 }
 ```
 
+### Sync Prices
+
+**POST** `/api/v1/sync/prices`
+
+Synchronize prices from source Magento to target Magento stores and/or Shopify stores. Fetches current prices from source and updates them on all specified target platforms.
+
+**Request Body:**
+```json
+{
+  "sku": "TEST-ABC",
+  "options": {
+    "targetMagentoStores": ["default", "misthub"],
+    "targetShopifyStores": ["store1"],
+    "includeMagento": true,
+    "includeShopify": true
+  }
+}
+```
+
+**Parameters:**
+- `sku` (required): The SKU of the configurable product whose prices to sync
+- `options` (optional):
+  - `targetMagentoStores` (array of strings): Target Magento store codes. If omitted, uses `TARGET_STORE_CODES` env var
+  - `targetShopifyStores` (array of strings): Target Shopify store names from `SHOPIFY_STORES` config. If omitted, syncs to all configured Shopify stores
+  - `includeMagento` (boolean, default: true): Whether to sync prices to Magento
+  - `includeShopify` (boolean, default: true): Whether to sync prices to Shopify
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "sku": "TEST-ABC",
+  "variantCount": 6,
+  "results": {
+    "magento": {
+      "default": { "success": true, "variantsUpdated": 6 },
+      "misthub": { "success": true, "variantsUpdated": 6 }
+    },
+    "shopify": {
+      "store1": { "success": true, "variantsUpdated": 6 }
+    }
+  },
+  "errors": [],
+  "warnings": []
+}
+```
+
+**Response (Partial Failure - 207):**
+```json
+{
+  "success": false,
+  "sku": "TEST-ABC",
+  "variantCount": 6,
+  "results": {
+    "magento": {
+      "default": { "success": true, "variantsUpdated": 6 },
+      "misthub": { "success": false, "error": "Connection timeout" }
+    }
+  },
+  "errors": [
+    { "store": "misthub", "message": "Connection timeout" }
+  ],
+  "warnings": []
+}
+```
+
+**Example:**
+```bash
+# Sync prices to default Magento stores from config
+curl -X POST http://localhost:3000/api/v1/sync/prices \
+  -H "Content-Type: application/json" \
+  -d '{"sku": "TEST-ABC"}'
+
+# Sync to specific stores, Magento only
+curl -X POST http://localhost:3000/api/v1/sync/prices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "TEST-ABC",
+    "options": {
+      "targetMagentoStores": ["default", "misthub", "ejuices"],
+      "includeShopify": false
+    }
+  }'
+```
+
+**Note:** Price sync uses scoped Magento API endpoints (`/rest/{storeCode}/V1/products`) to ensure prices are updated for each store view individually. Non-scoped updates only affect the global/default price and don't propagate to store views with existing price overrides.
+
 ## Migration Process
 
 The migration follows a 3-phase approach:
@@ -757,7 +845,7 @@ CONTINUE_ON_ERROR=true
 
 ## Google Chat Notifications
 
-The API can send real-time notifications to Google Chat when migrations start and complete.
+The API can send real-time notifications to Google Chat when migrations and price syncs start and complete.
 
 ### Notification Types
 
@@ -770,6 +858,16 @@ The API can send real-time notifications to Google Chat when migrations start an
 - Shows status, duration, and children migrated count
 - Includes error details if migration failed
 - Provides a "View Product in Magento" button linking directly to the product admin page
+
+**Price Sync Start**
+- Sent when a price sync begins
+- Shows SKU, variant count, and target stores
+
+**Price Sync Complete**
+- Sent when price sync finishes (success or failure)
+- Shows SKU, status, duration, and updated prices
+- Lists variant SKUs with their new prices (up to 10 shown)
+- Includes error details if sync failed
 
 ### Setup
 
@@ -862,7 +960,9 @@ src/
 ├── services/
 │   ├── magento/     # Magento API clients
 │   ├── shopify/     # Shopify GraphQL API clients
-│   └── migration/   # Migration services (extraction, preparation, creation)
+│   ├── migration/   # Migration services (extraction, preparation, creation)
+│   ├── sync/        # Price sync services
+│   └── notification/ # Google Chat notification service
 └── utils/           # Utility functions and helpers
 ```
 
@@ -885,3 +985,9 @@ src/
 - **OrchestratorService**: Coordinates Magento→Magento migration phases
 - **ShopifyOrchestratorService**: Coordinates Magento→Shopify migration phases
 - **ImageService**: Download and upload images
+
+### Sync Services
+- **PriceSyncService**: Synchronize prices from source to target platforms (Magento and Shopify)
+
+### Notification Services
+- **GoogleChatService**: Send real-time notifications to Google Chat for migrations and price syncs
