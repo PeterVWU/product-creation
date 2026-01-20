@@ -250,7 +250,8 @@ Migrate a single configurable product from source to target.
     "includeImages": true,
     "createMissingAttributes": true,
     "overwriteExisting": false,
-    "targetStores": ["default", "misthub"]
+    "targetStores": ["default", "misthub"],
+    "productEnabled": false
   }
 }
 ```
@@ -262,6 +263,7 @@ Migrate a single configurable product from source to target.
   - `createMissingAttributes` (boolean, default: true): Create missing attribute options in target
   - `overwriteExisting` (boolean, default: false): Overwrite existing products
   - `targetStores` (array of strings): Target store codes to migrate to (e.g., `["default", "misthub"]`). If omitted, uses `TARGET_STORE_CODES` env var or default endpoint
+  - `productEnabled` (boolean, default: true): Whether to create products as enabled or disabled. Set to `false` to create products in disabled status
 
 **Response (Success - 200):**
 ```json
@@ -448,7 +450,8 @@ curl -X POST http://localhost:3000/api/v1/migrate/product \
   -d '{
     "sku": "TEST-ABC",
     "options": {
-      "includeImages": true
+      "includeImages": true,
+      "productEnabled": false
     }
   }'
 ```
@@ -536,7 +539,8 @@ Migrate a Magento configurable product to Shopify.
   "sku": "MAGENTO-SKU-123",
   "options": {
     "includeImages": true,
-    "shopifyStore": "store1"
+    "shopifyStore": "store1",
+    "productStatus": "ACTIVE"
   }
 }
 ```
@@ -546,6 +550,7 @@ Migrate a Magento configurable product to Shopify.
 - `options` (optional):
   - `includeImages` (boolean, default: from config): Whether to migrate product images
   - `shopifyStore` (string): Name of the target Shopify store from `SHOPIFY_STORES` config
+  - `productStatus` (string, default: "DRAFT"): Shopify product status. Valid values: `"DRAFT"` or `"ACTIVE"`
 
 **Response (Success - 200):**
 ```json
@@ -602,7 +607,7 @@ Migrate a Magento configurable product to Shopify.
 
 3. **Image Upload**: Images are uploaded via URL from the source Magento media directory.
 
-4. **Product Status**: Products are created in DRAFT status, then published automatically.
+4. **Product Status**: Products are created in DRAFT status by default. Use `productStatus: "ACTIVE"` to create products as active immediately.
 
 ### Example: Shopify Migration
 
@@ -613,7 +618,8 @@ curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
     "sku": "TEST-ABC",
     "options": {
       "includeImages": true,
-      "shopifyStore": "mystore"
+      "shopifyStore": "mystore",
+      "productStatus": "ACTIVE"
     }
   }'
 ```

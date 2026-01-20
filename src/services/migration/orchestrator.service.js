@@ -75,7 +75,10 @@ class OrchestratorService {
         : config.migration.createMissingAttributes,
       overwriteExisting: options.overwriteExisting !== undefined
         ? options.overwriteExisting
-        : config.migration.overwriteExisting
+        : config.migration.overwriteExisting,
+      productEnabled: options.productEnabled !== undefined
+        ? options.productEnabled
+        : true
     };
 
     try {
@@ -415,7 +418,8 @@ class OrchestratorService {
         try {
           const updateResult = await scopedCreationService.updateProductsForStore(
             extractedData,
-            preparedData
+            preparedData,
+            options
           );
 
           storeResults[storeCode] = {

@@ -83,7 +83,7 @@ class CreationService {
    * Used for subsequent stores after the first store has done the full creation.
    * Only updates store-scoped attributes: name, price, status, visibility
    */
-  async updateProductsForStore(extractedData, preparedData) {
+  async updateProductsForStore(extractedData, preparedData, options = {}) {
     const { parent, children } = extractedData;
     const startTime = Date.now();
 
@@ -100,13 +100,17 @@ class CreationService {
       warnings: []
     };
 
+    const productStatus = options.productEnabled !== false
+      ? constants.MAGENTO_API.STATUS.ENABLED
+      : constants.MAGENTO_API.STATUS.DISABLED;
+
     try {
       // Update parent product store-scoped attributes
       await this.targetService.updateProduct(parent.sku, {
         sku: parent.sku,
         name: parent.name,
         price: parent.price,
-        status: constants.MAGENTO_API.STATUS.ENABLED,
+        status: productStatus,
         visibility: constants.MAGENTO_API.VISIBILITY.CATALOG_SEARCH
       });
 
@@ -119,7 +123,7 @@ class CreationService {
             sku: child.sku,
             name: child.name,
             price: child.price,
-            status: constants.MAGENTO_API.STATUS.ENABLED,
+            status: productStatus,
             visibility: constants.MAGENTO_API.VISIBILITY.NOT_VISIBLE
           });
           result.updatedChildren.push({ sku: child.sku, success: true });
@@ -281,7 +285,9 @@ class CreationService {
       name: sourceProduct.name,
       attribute_set_id: preparedData.attributeSet?.id || 4,
       price: sourceProduct.price,
-      status: constants.MAGENTO_API.STATUS.ENABLED,
+      status: options.productEnabled !== false
+        ? constants.MAGENTO_API.STATUS.ENABLED
+        : constants.MAGENTO_API.STATUS.DISABLED,
       visibility: constants.MAGENTO_API.VISIBILITY.NOT_VISIBLE,
       type_id: constants.MAGENTO_API.PRODUCT_TYPES.SIMPLE,
       weight: sourceProduct.weight || 0,
@@ -317,7 +323,9 @@ class CreationService {
         name: parent.name,
         attribute_set_id: preparedData.attributeSet?.id || 4,
         price: parent.price,
-        status: constants.MAGENTO_API.STATUS.ENABLED,
+        status: options.productEnabled !== false
+          ? constants.MAGENTO_API.STATUS.ENABLED
+          : constants.MAGENTO_API.STATUS.DISABLED,
         visibility: constants.MAGENTO_API.VISIBILITY.CATALOG_SEARCH,
         type_id: constants.MAGENTO_API.PRODUCT_TYPES.CONFIGURABLE,
         weight: parent.weight || 0,

@@ -30,7 +30,7 @@ class ShopifyCreationService {
 
     try {
       // Build product data
-      const productData = this.buildShopifyProduct(parent, children, translations);
+      const productData = this.buildShopifyProduct(parent, children, translations, options.productStatus);
 
       // Build product options from configurable attributes
       const productOptions = this.buildProductOptionsForSet(parent, translations);
@@ -125,7 +125,7 @@ class ShopifyCreationService {
     }
   }
 
-  buildShopifyProduct(magentoParent, children, translations) {
+  buildShopifyProduct(magentoParent, children, translations, status = 'DRAFT') {
     const handle = this.slugify(magentoParent.sku);
 
     // Extract description from custom attributes
@@ -139,7 +139,7 @@ class ShopifyCreationService {
       title: magentoParent.name,
       handle: handle,
       descriptionHtml: description,
-      status: 'DRAFT',
+      status: status,
       productType: this.extractCustomAttribute(magentoParent, 'product_type') || 'Default'
     };
 
