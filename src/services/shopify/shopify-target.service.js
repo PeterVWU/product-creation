@@ -148,6 +148,7 @@ class ShopifyTargetService extends ShopifyClient {
             price
             inventoryItem {
               id
+              sku
             }
           }
           userErrors {
@@ -166,6 +167,172 @@ class ShopifyTargetService extends ShopifyClient {
 
     const result = await this.query(mutation, variables);
     return result.data.productVariantsBulkCreate.productVariants;
+  }
+
+  /**
+   * Create media on a product from external URLs.
+   * Use this for variant sync to add images to an existing product.
+   * @param {string} productId - The Shopify product ID
+   * @param {Array} images - Array of {url, alt, sku} objects
+   * @returns {Array} Array of {id, sku} objects with product media IDs
+   */
+  async createProductMedia(productId, images) {
+    logger.info('Creating product media from external URLs', {
+      productId,
+      imageCount: images.length
+    });
+
+    const mutation = `
+      mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+        productCreateMedia(productId: $productId, media: $media) {
+          media {
+            ... on MediaImage {
+              id
+              alt
+              image {
+                url
+              }
+            }
+          }
+          mediaUserErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const mediaInputs = images.map(image => ({
+      originalSource: image.url,
+      alt: image.alt || '',
+      mediaContentType: 'IMAGE'
+    }));
+
+    const variables = {
+      productId,
+      media: mediaInputs
+    };
+
+    const result = await this.query(mutation, variables);
+
+    if (result.data.productCreateMedia.mediaUserErrors?.length > 0) {
+      const errors = result.data.productCreateMedia.mediaUserErrors;
+      logger.error('Failed to create product media', { errors });
+      throw new Error(`Media creation failed: ${errors.map(e => e.message).join(', ')}`);
+    }
+
+    // Map media IDs back to SKUs based on order
+    const createdMedia = result.data.productCreateMedia.media || [];
+    const mediaWithSkus = createdMedia.map((media, index) => ({
+      id: media.id,
+      sku: images[index]?.sku || null
+    }));
+
+    logger.info('Product media created', {
+      productId,
+      mediaCount: mediaWithSkus.length
+    });
+
+    // Wait for all media to be ready before returning
+    const readyMedia = [];
+    for (const media of mediaWithSkus) {
+      try {
+        await this.waitForMediaReady(media.id);
+        readyMedia.push(media);
+      } catch (error) {
+        logger.error('Media failed to become ready', { mediaId: media.id, error: error.message });
+      }
+    }
+
+    logger.info('Product media ready', {
+      productId,
+      readyCount: readyMedia.length,
+      totalCount: mediaWithSkus.length
+    });
+
+    return readyMedia;
+  }
+
+  /**
+   * Wait for product media to be ready.
+   * @param {string} mediaId - The media ID to wait for
+   * @param {number} maxAttempts - Maximum polling attempts (default 30)
+   * @param {number} delayMs - Delay between attempts in ms (default 1000)
+   * @returns {Object} The media object when ready
+   */
+  async waitForMediaReady(mediaId, maxAttempts = 30, delayMs = 1000) {
+    logger.debug('Waiting for media to be ready', { mediaId });
+
+    const query = `
+      query checkMediaStatus($id: ID!) {
+        node(id: $id) {
+          ... on MediaImage {
+            id
+            status
+            image {
+              url
+            }
+          }
+        }
+      }
+    `;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const result = await this.query(query, { id: mediaId });
+      const media = result.data.node;
+
+      if (!media) {
+        throw new Error(`Media not found: ${mediaId}`);
+      }
+
+      logger.debug('Media status check', { mediaId, status: media.status, attempt: attempt + 1 });
+
+      if (media.status === 'READY') {
+        logger.info('Media is ready', { mediaId });
+        return media;
+      }
+
+      if (media.status === 'FAILED') {
+        throw new Error(`Media processing failed for ${mediaId}`);
+      }
+
+      // Still PROCESSING or UPLOADED - wait and retry
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
+    throw new Error(`Timeout waiting for media ${mediaId} to be ready after ${maxAttempts} attempts`);
+  }
+
+  /**
+   * Append media to variants using productVariantAppendMedia mutation.
+   * This is used when syncing missing variants, since productVariantsBulkCreate
+   * does not support the 'file' field for image association.
+   * @param {string} productId - The Shopify product ID
+   * @param {Array} variantMedia - Array of {variantId, mediaIds} objects
+   * @returns {Array} The updated product variants
+   */
+  async appendMediaToVariants(productId, variantMedia) {
+    logger.info('Appending media to variants', { productId, variantCount: variantMedia.length });
+
+    const mutation = `
+      mutation productVariantAppendMedia($productId: ID!, $variantMedia: [ProductVariantAppendMediaInput!]!) {
+        productVariantAppendMedia(productId: $productId, variantMedia: $variantMedia) {
+          product { id }
+          productVariants { id }
+          userErrors { field message }
+        }
+      }
+    `;
+
+    const result = await this.query(mutation, { productId, variantMedia });
+
+    if (result.data.productVariantAppendMedia.userErrors?.length > 0) {
+      const errors = result.data.productVariantAppendMedia.userErrors;
+      logger.error('Failed to append media to variants', { errors });
+      throw new Error(`Media append failed: ${errors.map(e => e.message).join(', ')}`);
+    }
+
+    return result.data.productVariantAppendMedia.productVariants;
   }
 
   /**

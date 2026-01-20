@@ -163,9 +163,8 @@ class ShopifyCreationService {
     }
 
     try {
-      // Build and upload images for new variants only
-      let fileIds = [];
-      let skuToFileIndex = {};
+      // Build image inputs for new variants only (external URLs with SKU mapping)
+      let imageInputs = [];
 
       if (options.includeImages && images) {
         // Filter images to only include new children
@@ -177,25 +176,19 @@ class ShopifyCreationService {
           )
         };
 
-        const { inputs, skuToFileIndex: mapping } = this.buildImageInputs(filteredImages, parent, newChildren);
-        skuToFileIndex = mapping;
-
-        if (inputs.length > 0) {
-          logger.info('Uploading images for new variants', { count: inputs.length });
-          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(inputs);
-          logger.info('Images uploaded and ready', { count: fileIds.filter(f => f !== null).length });
-        }
+        const { inputs } = this.buildImageInputs(filteredImages, parent, newChildren);
+        imageInputs = inputs;
       }
 
-      // Build variant data for new children only
-      const variants = this.buildVariantsForSet(newChildren, translations, fileIds, skuToFileIndex);
+      // Build variant data for new children (without file associations for bulk create)
+      const variants = this.buildVariantsForSet(newChildren, translations, [], {});
 
       logger.info('Creating new variants in Shopify', {
         productId: existingProductId,
         variantCount: variants.length
       });
 
-      // Create new variants using the existing createProductVariants method
+      // Create new variants using productVariantsBulkCreate
       const createdVariants = await this.shopifyTargetService.createProductVariants(
         existingProductId,
         variants
@@ -207,7 +200,45 @@ class ShopifyCreationService {
         success: true
       }));
       result.variantsCreated = result.createdVariants.length;
-      result.imagesUploaded = fileIds.filter(f => f !== null).length;
+
+      // Associate images with variants using two-step process:
+      // 1. Create media on the product using productCreateMedia
+      // 2. Append media to variants using productVariantAppendMedia
+      if (imageInputs.length > 0 && createdVariants.length > 0) {
+        logger.info('Creating product media for new variants', { count: imageInputs.length });
+
+        // Step 1: Create media on the product (returns media IDs with SKU mapping)
+        const productMedia = await this.shopifyTargetService.createProductMedia(
+          existingProductId,
+          imageInputs
+        );
+
+        result.imagesUploaded = productMedia.length;
+
+        // Step 2: Build variant-media associations and append
+        const variantMedia = [];
+
+        for (const media of productMedia) {
+          if (media.sku) {
+            const createdVariant = createdVariants.find(v =>
+              v.sku === media.sku || v.inventoryItem?.sku === media.sku
+            );
+
+            if (createdVariant) {
+              variantMedia.push({
+                variantId: createdVariant.id,
+                mediaIds: [media.id]
+              });
+            }
+          }
+        }
+
+        if (variantMedia.length > 0) {
+          await this.shopifyTargetService.appendMediaToVariants(existingProductId, variantMedia);
+          logger.info('Associated images with variants', { count: variantMedia.length });
+        }
+      }
+
       result.success = true;
 
       const duration = Date.now() - startTime;
