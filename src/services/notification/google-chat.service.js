@@ -94,6 +94,115 @@ class GoogleChatService {
     await this.sendMessage(card);
   }
 
+  async notifyPriceSyncStart(sku, variantCount, targetStores = []) {
+    const widgets = [
+      {
+        decoratedText: {
+          text: `<b>SKU:</b> ${sku}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Variants:</b> ${variantCount}`
+        }
+      }
+    ];
+
+    if (targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+    }
+
+    const card = {
+      cardsV2: [{
+        cardId: 'price-sync-start',
+        card: {
+          sections: [{
+            header: '💰 Price Sync Started',
+            widgets
+          }]
+        }
+      }]
+    };
+
+    await this.sendMessage(card);
+  }
+
+  async notifyPriceSyncEnd(syncContext) {
+    const { sku, success, variantCount, prices, errors, targetStores, duration } = syncContext;
+
+    const statusText = success ? 'Completed Successfully' : 'Failed';
+    const sectionHeader = success ? '✅ Price Sync Completed' : '❌ Price Sync Failed';
+
+    const widgets = [
+      {
+        decoratedText: {
+          text: `<b>SKU:</b> ${sku}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Status:</b> ${statusText}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Duration:</b> ${duration}ms`
+        }
+      }
+    ];
+
+    if (success && prices && prices.length > 0) {
+      const priceList = prices.slice(0, 10).map(p => `${p.sku}: $${p.price}`).join(', ');
+      const suffix = prices.length > 10 ? ` (+${prices.length - 10} more)` : '';
+      widgets.push({
+        decoratedText: {
+          text: `<b>Updated Prices:</b> ${priceList}${suffix}`
+        }
+      });
+    }
+
+    if (success) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Variants Updated:</b> ${variantCount}`
+        }
+      });
+    } else if (errors && errors.length > 0) {
+      const errorMessage = errors[errors.length - 1].message;
+      widgets.push({
+        decoratedText: {
+          text: `<b>Error:</b> ${errorMessage}`
+        }
+      });
+    }
+
+    if (targetStores && targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+    }
+
+    const card = {
+      cardsV2: [{
+        cardId: 'price-sync-end',
+        card: {
+          sections: [{
+            header: sectionHeader,
+            widgets
+          }]
+        }
+      }]
+    };
+
+    await this.sendMessage(card);
+  }
+
   async notifyMigrationEnd(migrationContext) {
     const { sku, success, summary, errors, productId, targetStores, storeResults, shopifyProductUrl } = migrationContext;
 

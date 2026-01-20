@@ -47,6 +47,17 @@ class TargetService extends MagentoClient {
     return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, payload);
   }
 
+  async updateProductPrice(sku, price) {
+    logger.info('Updating product price in target', { sku, price });
+    const payload = {
+      product: {
+        sku,
+        price
+      }
+    };
+    return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, payload);
+  }
+
   async getAttributeByCode(code) {
     logger.debug('Fetching attribute from target', { code });
     try {

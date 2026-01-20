@@ -574,6 +574,64 @@ class ShopifyTargetService extends ShopifyClient {
     };
   }
 
+  /**
+   * Update variant prices in bulk using productVariantsBulkUpdate mutation.
+   * @param {string} productId - The Shopify product ID (gid://shopify/Product/...)
+   * @param {Array} variantPrices - Array of { id: "gid://shopify/ProductVariant/123", price: "99.99" }
+   * @returns {Object} Result containing updated variants and any errors
+   */
+  async updateVariantPrices(productId, variantPrices) {
+    logger.info('Updating variant prices in Shopify', {
+      productId,
+      variantCount: variantPrices.length
+    });
+
+    const mutation = `
+      mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants {
+            id
+            price
+            sku
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variants = variantPrices.map(v => ({
+      id: v.id,
+      price: String(v.price)
+    }));
+
+    const variables = {
+      productId,
+      variants
+    };
+
+    const result = await this.query(mutation, variables);
+
+    if (result.data.productVariantsBulkUpdate.userErrors?.length > 0) {
+      const errors = result.data.productVariantsBulkUpdate.userErrors;
+      logger.error('Failed to update variant prices', { productId, errors });
+      throw new Error(`Variant price update failed: ${errors.map(e => e.message).join(', ')}`);
+    }
+
+    const updatedVariants = result.data.productVariantsBulkUpdate.productVariants || [];
+    logger.info('Variant prices updated', {
+      productId,
+      updatedCount: updatedVariants.length
+    });
+
+    return {
+      productVariants: updatedVariants,
+      updatedCount: updatedVariants.length
+    };
+  }
+
   async publishProduct(productId) {
     logger.info('Publishing product in Shopify', { productId });
 
