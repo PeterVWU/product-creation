@@ -681,6 +681,7 @@ Migrate a Magento configurable product to Shopify.
 | `parent.name` | `product.title` |
 | `parent.description` | `product.descriptionHtml` |
 | `parent.sku` | `product.handle` (slugified) |
+| `parent.meta_keyword` | `product.tags` (comma-separated) |
 | `child.sku` | `variant.sku` |
 | `child.price` | `variant.price` |
 | `child.weight` | `variant.weight` |

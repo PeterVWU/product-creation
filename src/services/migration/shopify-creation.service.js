@@ -274,6 +274,14 @@ class ShopifyCreationService {
     const description = this.extractCustomAttribute(magentoParent, 'description') ||
                         this.extractCustomAttribute(magentoParent, 'short_description') || '';
 
+    // Extract vendor (brand label) and tags (meta_keywords) from translations
+    const vendor = translations.brandLabel || '';
+    const metaKeywords = this.extractCustomAttribute(magentoParent, 'meta_keyword') || '';
+    const tags = metaKeywords
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
+
     // Note: Product options are NOT set here - they are created automatically
     // when variants with optionValues are added via productVariantsBulkCreate
 
@@ -282,7 +290,9 @@ class ShopifyCreationService {
       handle: handle,
       descriptionHtml: description,
       status: status,
-      productType: this.extractCustomAttribute(magentoParent, 'product_type') || 'Default'
+      productType: this.extractCustomAttribute(magentoParent, 'product_type') || 'Default',
+      vendor: vendor,
+      tags: tags
     };
 
     logger.debug('Built Shopify product input', {

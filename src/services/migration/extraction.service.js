@@ -168,6 +168,8 @@ class ExtractionService {
       translations.customAttributes = await this.attributeService.translateCustomAttributes(parent);
     }
 
+    translations.brandLabel = await this.attributeService.translateBrandAttribute(parent);
+
     const categoryIds = parent.extension_attributes?.category_links?.map(link => link.category_id) || [];
     if (categoryIds.length > 0) {
       translations.categories = await this.attributeService.translateCategories(categoryIds);

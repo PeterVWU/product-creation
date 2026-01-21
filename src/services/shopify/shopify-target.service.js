@@ -108,6 +108,8 @@ class ShopifyTargetService extends ShopifyClient {
       descriptionHtml: productData.descriptionHtml,
       productType: productData.productType,
       status: productData.status || 'DRAFT',
+      vendor: productData.vendor || '',
+      tags: productData.tags || [],
       productOptions: options,
       variants: variants
     };

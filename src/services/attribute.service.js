@@ -92,6 +92,22 @@ class AttributeService {
     return translations;
   }
 
+  async translateBrandAttribute(product) {
+    if (!product.custom_attributes) return null;
+
+    const brandAttr = product.custom_attributes.find(a => a.attribute_code === 'brand');
+    if (!brandAttr || !brandAttr.value) return null;
+
+    try {
+      const brandOptions = await this.sourceService.getAttributeOptions('brand');
+      const option = brandOptions.find(opt => opt.value === brandAttr.value.toString());
+      return option?.label || null;
+    } catch (error) {
+      logger.warn('Failed to translate brand attribute', { error: error.message });
+      return null;
+    }
+  }
+
   async translateCategories(categoryIds) {
     if (!categoryIds || categoryIds.length === 0) return {};
 
