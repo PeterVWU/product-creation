@@ -367,6 +367,11 @@ class CreationService {
 
     if (sourceProduct.custom_attributes) {
       for (const attr of sourceProduct.custom_attributes) {
+        // Skip category_ids - categories are handled separately
+        if (attr.attribute_code === 'category_ids') {
+          continue;
+        }
+
         const alreadyMapped = customAttributes.find(ca => ca.attribute_code === attr.attribute_code);
         if (alreadyMapped) {
           continue;
@@ -433,6 +438,10 @@ class CreationService {
 
       if (parent.custom_attributes) {
         for (const attr of parent.custom_attributes) {
+          // Skip category_ids - categories are handled via extension_attributes.category_links
+          if (attr.attribute_code === 'category_ids') {
+            continue;
+          }
           customAttributes.push({
             attribute_code: attr.attribute_code,
             value: attr.value
@@ -457,6 +466,24 @@ class CreationService {
       // Add website_ids if provided (for multi-store website assignment)
       if (options.websiteIds && options.websiteIds.length > 0) {
         productData.website_ids = options.websiteIds;
+      }
+
+      // Add category_links from prepared category mapping
+      if (preparedData.categoryMapping && Object.keys(preparedData.categoryMapping).length > 0) {
+        const categoryLinks = Object.values(preparedData.categoryMapping).map(categoryId => ({
+          category_id: categoryId.toString(),
+          position: 0
+        }));
+
+        productData.extension_attributes = {
+          ...productData.extension_attributes,
+          category_links: categoryLinks
+        };
+
+        logger.debug('Adding category links to product', {
+          sku: parent.sku,
+          categoryIds: Object.values(preparedData.categoryMapping)
+        });
       }
 
       const createdProduct = await this.targetService.createProduct(productData);
