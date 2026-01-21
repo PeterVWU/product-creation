@@ -160,7 +160,7 @@ class ExtractionService {
       parent.attribute_set_id
     );
 
-    const configurableTranslations = await this.attributeService.translateConfigurableOptions(parent);
+    const configurableTranslations = await this.attributeService.translateConfigurableOptions(parent, children);
     translations.attributes = configurableTranslations.attributes;
     translations.attributeValues = configurableTranslations.attributeValues;
 

@@ -22,7 +22,7 @@ class AttributeService {
     }
   }
 
-  async translateConfigurableOptions(product) {
+  async translateConfigurableOptions(product, children = []) {
     const translations = {
       attributes: {},
       attributeValues: {}
@@ -41,6 +41,8 @@ class AttributeService {
         if (attribute) {
           translations.attributes[option.attribute_id] = attribute.attribute_code;
 
+          // Try to get values from option.values first
+          let hasValues = false;
           if (option.values && option.values.length > 0) {
             const attributeOptions = await this.sourceService.getAttributeOptions(attribute.attribute_code);
 
@@ -65,6 +67,41 @@ class AttributeService {
                   label: optionData.label,
                   value: value.value_index
                 };
+                hasValues = true;
+              }
+            }
+          }
+
+          // If no values found from option.values, extract from children's custom_attributes
+          if (!hasValues && children.length > 0) {
+            const attributeOptions = await this.sourceService.getAttributeOptions(attribute.attribute_code);
+            const seenValues = new Set();
+
+            for (const child of children) {
+              const childAttr = child.custom_attributes?.find(
+                a => a.attribute_code === attribute.attribute_code
+              );
+
+              if (childAttr && childAttr.value != null && !seenValues.has(childAttr.value.toString())) {
+                seenValues.add(childAttr.value.toString());
+
+                const optionData = attributeOptions.find(
+                  opt => opt.value === childAttr.value.toString()
+                );
+
+                if (optionData && optionData.label) {
+                  const key = `${option.attribute_id}_${childAttr.value}`;
+                  translations.attributeValues[key] = {
+                    attributeCode: attribute.attribute_code,
+                    label: optionData.label,
+                    value: parseInt(childAttr.value, 10)
+                  };
+                  logger.debug('Extracted attribute value from child', {
+                    attributeCode: attribute.attribute_code,
+                    label: optionData.label,
+                    value: childAttr.value
+                  });
+                }
               }
             }
           }
