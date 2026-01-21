@@ -280,6 +280,7 @@ class CreationService {
           child,
           preparedData,
           linkData,
+          extractedData,
           options
         );
 
@@ -324,8 +325,21 @@ class CreationService {
     return createdProducts;
   }
 
-  buildSimpleProductData(sourceProduct, preparedData, linkData, options = {}) {
+  buildSimpleProductData(sourceProduct, preparedData, linkData, extractedData, options = {}) {
     const customAttributes = [];
+
+    // Build reverse lookup: { "flavor": { "789": "Apple Banana" } }
+    // This maps (attributeCode, sourceOptionId) → label
+    const optionIdToLabel = {};
+    if (extractedData?.translations?.attributeValues) {
+      for (const [key, valueData] of Object.entries(extractedData.translations.attributeValues)) {
+        const { attributeCode, label, value } = valueData;
+        if (!optionIdToLabel[attributeCode]) {
+          optionIdToLabel[attributeCode] = {};
+        }
+        optionIdToLabel[attributeCode][value.toString()] = label;
+      }
+    }
 
     if (linkData && linkData.attributes) {
       for (const attr of linkData.attributes) {
@@ -361,13 +375,22 @@ class CreationService {
         const mappedAttr = preparedData.attributeMapping[attr.attribute_code];
 
         if (mappedAttr && mappedAttr.options) {
-          const optionLabel = this.findOptionLabel(attr.value, attr.attribute_code, sourceProduct);
+          // Translate source option ID to label using the reverse lookup map
+          const sourceValue = attr.value.toString();
+          const optionLabel = optionIdToLabel[attr.attribute_code]?.[sourceValue] || sourceValue;
           const targetValue = mappedAttr.options[optionLabel];
 
           if (targetValue) {
             customAttributes.push({
               attribute_code: attr.attribute_code,
               value: targetValue
+            });
+            logger.debug('Mapped configurable attribute from custom_attributes', {
+              sku: sourceProduct.sku,
+              attribute: attr.attribute_code,
+              sourceValue,
+              optionLabel,
+              targetValue
             });
           }
         } else {
@@ -587,17 +610,6 @@ class CreationService {
     });
   }
 
-  findOptionLabel(value, attributeCode, product) {
-    if (!product.custom_attributes) return value;
-
-    const attr = product.custom_attributes.find(a => a.attribute_code === attributeCode);
-
-    if (attr && attr.value) {
-      return attr.value.toString();
-    }
-
-    return value.toString();
-  }
 }
 
 module.exports = CreationService;
