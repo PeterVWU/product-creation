@@ -937,6 +937,22 @@ If images fail to upload:
 2. Verify image file sizes (max 10MB by default)
 3. Check target Magento has sufficient storage
 
+### Shopify Variant Sync "Option does not exist" Error
+
+When syncing missing variants to an existing Shopify product, you may encounter:
+```
+variants.0.optionValues.2: Option does not exist
+```
+
+**Cause**: New variants from Magento have more configurable attributes (e.g., Color, Size, Material) than the existing Shopify product has options (e.g., only Color, Size).
+
+**Solution**: The API automatically filters variant option values to only include options that already exist on the Shopify product. Logs will show:
+```
+Existing Shopify product options: ["Color", "Size"]
+```
+
+The variant will be created with only Color and Size values, dropping Material.
+
 ### Google Chat Notifications Not Working
 
 If notifications aren't appearing:

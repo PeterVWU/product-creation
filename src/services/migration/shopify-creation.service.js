@@ -3,9 +3,10 @@ const config = require('../../config');
 const { CreationError } = require('../../utils/error-handler');
 
 class ShopifyCreationService {
-  constructor(sourceService, shopifyTargetService) {
+  constructor(sourceService, shopifyTargetService, categoryMappingService = null) {
     this.sourceService = sourceService;
     this.shopifyTargetService = shopifyTargetService;
+    this.categoryMappingService = categoryMappingService;
   }
 
   async createProducts(extractedData, options = {}) {
@@ -29,8 +30,11 @@ class ShopifyCreationService {
     };
 
     try {
+      // Extract source category names from extracted data
+      const sourceCategoryNames = (extractedData.categories || []).map(cat => cat.name);
+
       // Build product data
-      const productData = this.buildShopifyProduct(parent, children, translations, options.productStatus);
+      const productData = this.buildShopifyProduct(parent, children, translations, options.productStatus, sourceCategoryNames);
 
       // Build product options from configurable attributes
       const productOptions = this.buildProductOptionsForSet(parent, translations);
@@ -180,8 +184,17 @@ class ShopifyCreationService {
         imageInputs = inputs;
       }
 
-      // Build variant data for new children (without file associations for bulk create)
-      const variants = this.buildVariantsForSet(newChildren, translations, [], {});
+      // Fetch existing product to get its options
+      const existingProduct = await this.shopifyTargetService.getProductById(existingProductId);
+      const existingOptionNames = (existingProduct?.options || []).map(o => o.name);
+
+      logger.info('Existing Shopify product options', {
+        productId: existingProductId,
+        options: existingOptionNames
+      });
+
+      // Build variant data for new children, filtering to only existing options
+      const variants = this.buildVariantsForSet(newChildren, translations, [], {}, existingOptionNames);
 
       logger.info('Creating new variants in Shopify', {
         productId: existingProductId,
@@ -267,7 +280,7 @@ class ShopifyCreationService {
     }
   }
 
-  buildShopifyProduct(magentoParent, children, translations, status = 'DRAFT') {
+  buildShopifyProduct(magentoParent, children, translations, status = 'DRAFT', sourceCategoryNames = []) {
     const handle = this.slugify(magentoParent.sku);
 
     // Extract description from custom attributes
@@ -282,6 +295,22 @@ class ShopifyCreationService {
       .map(tag => tag.trim())
       .filter(tag => tag.length > 0);
 
+    // Determine productType: first try category mapping, then fall back to product_type attribute
+    let productType = null;
+    if (this.categoryMappingService && sourceCategoryNames.length > 0) {
+      productType = this.categoryMappingService.getShopifyProductType(sourceCategoryNames);
+      if (productType) {
+        logger.debug('Using category mapping for productType', {
+          sourceCategories: sourceCategoryNames,
+          productType
+        });
+      }
+    }
+
+    if (!productType) {
+      productType = this.extractCustomAttribute(magentoParent, 'product_type') || 'Default';
+    }
+
     // Note: Product options are NOT set here - they are created automatically
     // when variants with optionValues are added via productVariantsBulkCreate
 
@@ -290,14 +319,15 @@ class ShopifyCreationService {
       handle: handle,
       descriptionHtml: description,
       status: status,
-      productType: this.extractCustomAttribute(magentoParent, 'product_type') || 'Default',
+      productType: productType,
       vendor: vendor,
       tags: tags
     };
 
     logger.debug('Built Shopify product input', {
       title: productInput.title,
-      handle: productInput.handle
+      handle: productInput.handle,
+      productType: productInput.productType
     });
 
     return productInput;
@@ -338,7 +368,7 @@ class ShopifyCreationService {
     return options;
   }
 
-  buildVariantsForSet(children, translations, fileIds = [], skuToFileIndex = {}) {
+  buildVariantsForSet(children, translations, fileIds = [], skuToFileIndex = {}, allowedOptionNames = null) {
     const variants = [];
     const skippedVariants = [];
 
@@ -374,8 +404,21 @@ class ShopifyCreationService {
       }
 
       // Only include variants that have option values (limit to 3)
-      const limitedOptionValues = optionValues.slice(0, 3);
-      const requiredOptions = Math.min(expectedOptionCount, 3); // Shopify max is 3
+      let limitedOptionValues = optionValues.slice(0, 3);
+
+      // If allowedOptionNames is provided (variant sync mode), filter to only those options
+      if (allowedOptionNames) {
+        const allowedSet = new Set(allowedOptionNames.map(n => n.toLowerCase()));
+        limitedOptionValues = limitedOptionValues.filter(ov =>
+          allowedSet.has(ov.optionName.toLowerCase())
+        );
+      }
+
+      // In variant sync mode, require only the number of options that exist on the target product
+      // Otherwise, use the expected option count from source
+      const requiredOptions = allowedOptionNames
+        ? allowedOptionNames.length
+        : Math.min(expectedOptionCount, 3); // Shopify max is 3
 
       // Skip variants that don't have all required option values
       if (limitedOptionValues.length < requiredOptions) {
