@@ -43,10 +43,14 @@ const buildProductPayload = (productData, options = {}) => {
       price: productData.price,
       status: productData.status,
       visibility: productData.visibility,
-      type_id: productData.type_id,
-      weight: productData.weight || 0
+      type_id: productData.type_id
     }
   };
+
+  // Only include weight if explicitly provided (avoid overwriting on store-scoped updates)
+  if (productData.weight !== undefined) {
+    payload.product.weight = productData.weight.toString();
+  }
 
   if (productData.custom_attributes && productData.custom_attributes.length > 0) {
     payload.product.custom_attributes = productData.custom_attributes;
@@ -62,6 +66,18 @@ const buildProductPayload = (productData, options = {}) => {
       payload.product.extension_attributes = {};
     }
     payload.product.extension_attributes.website_ids = productData.website_ids;
+  }
+
+  // Add stock_item to extension_attributes for inventory management
+  if (productData.stock_item) {
+    if (!payload.product.extension_attributes) {
+      payload.product.extension_attributes = {};
+    }
+    payload.product.extension_attributes.stock_item = {
+      qty: productData.stock_item.qty || 0,
+      is_in_stock: productData.stock_item.is_in_stock !== false,
+      manage_stock: productData.stock_item.manage_stock !== false
+    };
   }
 
   return payload;

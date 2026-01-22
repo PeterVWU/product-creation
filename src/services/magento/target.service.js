@@ -9,6 +9,8 @@ class TargetService extends MagentoClient {
     this._baseUrl = baseUrl;
     this._token = token;
     this._config = config;
+    // Cache for category lookups
+    this._categoryCache = new Map();
   }
 
   createScopedInstance(storeCode) {
@@ -19,7 +21,24 @@ class TargetService extends MagentoClient {
   async createProduct(productData) {
     logger.info('Creating product in target', { sku: productData.sku });
     const payload = buildProductPayload(productData);
-    return await this.post('/rest/V1/products', payload);
+    // Log payload without base64 image data to avoid cluttering logs
+    const logPayload = JSON.parse(JSON.stringify(payload));
+    if (logPayload.product?.media_gallery_entries) {
+      logPayload.product.media_gallery_entries = logPayload.product.media_gallery_entries.map(entry => ({
+        ...entry,
+        content: entry.content ? { ...entry.content, base64_encoded_data: '[REDACTED]' } : entry.content
+      }));
+    }
+    logger.debug('Product payload being sent', { payload: JSON.stringify(logPayload, null, 2) });
+    // Use /rest/all/V1/products to ensure global-scope attributes (weight, etc.) are saved
+    // Store-scoped endpoints don't save global attributes properly (Magento bug)
+    const response = await this.client.post('/rest/all/V1/products', payload);
+    logger.info('Product creation response', {
+      sku: response.data?.sku,
+      weight: response.data?.weight,
+      responseKeys: Object.keys(response.data || {})
+    });
+    return response.data;
   }
 
   async getProductBySku(sku) {
@@ -56,6 +75,20 @@ class TargetService extends MagentoClient {
       }
     };
     return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, payload);
+  }
+
+  async updateProductWeight(sku, weight) {
+    logger.info('Updating product weight', { sku, weight });
+    const payload = {
+      product: {
+        sku,
+        weight: weight.toString()
+      }
+    };
+    // Use global endpoint for global-scope attributes
+    const response = await this.client.put(`/rest/all/V1/products/${encodeURIComponent(sku)}`, payload);
+    logger.info('Weight update response', { sku, weight: response.data?.weight });
+    return response.data;
   }
 
   async getAttributeByCode(code) {
@@ -231,6 +264,56 @@ class TargetService extends MagentoClient {
       logger.error('Failed to fetch store website mapping', { error: error.message });
       throw error;
     }
+  }
+
+  async getCategoryByName(name) {
+    logger.debug('Searching for category by name', { name });
+
+    try {
+      // Search for category by name using Magento search criteria
+      const searchCriteria = `searchCriteria[filterGroups][0][filters][0][field]=name&` +
+        `searchCriteria[filterGroups][0][filters][0][value]=${encodeURIComponent(name)}&` +
+        `searchCriteria[filterGroups][0][filters][0][conditionType]=eq`;
+
+      const response = await this.get(`/rest/V1/categories/list?${searchCriteria}`);
+
+      if (response.items && response.items.length > 0) {
+        const category = response.items[0];
+        logger.debug('Category found', { name, categoryId: category.id });
+        return category;
+      }
+
+      logger.debug('Category not found', { name });
+      return null;
+    } catch (error) {
+      logger.warn('Failed to search for category', { name, error: error.message });
+      return null;
+    }
+  }
+
+  async getCategoryIdByName(name) {
+    // Check cache first
+    const cacheKey = name.toLowerCase();
+    if (this._categoryCache.has(cacheKey)) {
+      const cachedId = this._categoryCache.get(cacheKey);
+      logger.debug('Category ID found in cache', { name, categoryId: cachedId });
+      return cachedId;
+    }
+
+    const category = await this.getCategoryByName(name);
+
+    if (category) {
+      // Cache the result
+      this._categoryCache.set(cacheKey, category.id);
+      return category.id;
+    }
+
+    return null;
+  }
+
+  clearCategoryCache() {
+    this._categoryCache.clear();
+    logger.debug('Category cache cleared');
   }
 }
 
