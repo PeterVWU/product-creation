@@ -605,7 +605,7 @@ class ShopifyTargetService extends ShopifyClient {
     logger.info('Fetching variants by SKUs', { count: skus.length, skus });
 
     // Build query string: "sku:SKU1 OR sku:SKU2 OR sku:SKU3"
-    const queryString = skus.map(sku => `sku:${sku}`).join(' OR ');
+    const queryString = skus.map(sku => `sku:"${sku}"`).join(' OR ');
 
     const query = `
       query findVariantsBySkus($query: String!) {
