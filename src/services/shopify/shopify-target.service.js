@@ -718,12 +718,31 @@ class ShopifyTargetService extends ShopifyClient {
     `;
 
     const pubResult = await this.query(publicationQuery);
-    const onlineStore = pubResult.data.publications.edges.find(
-      edge => edge.node.name === 'Online Store'
+
+    // Log all available publications for debugging
+    logger.info('Available publications', {
+      publications: pubResult.data.publications.edges.map(e => ({
+        id: e.node.id,
+        name: e.node.name
+      }))
+    });
+
+    // Try case-insensitive match first
+    let onlineStore = pubResult.data.publications.edges.find(
+      edge => edge.node.name.toLowerCase() === 'online store'
     );
 
+    // Fallback: if no "online store", use the first publication (usually the main store)
+    if (!onlineStore && pubResult.data.publications.edges.length > 0) {
+      onlineStore = pubResult.data.publications.edges[0];
+      logger.info('Online Store not found by name, using first publication', {
+        publicationId: onlineStore.node.id,
+        publicationName: onlineStore.node.name
+      });
+    }
+
     if (!onlineStore) {
-      logger.warn('Online Store publication not found, product may not be visible');
+      logger.warn('No publications found, product may not be visible');
       return null;
     }
 
@@ -750,6 +769,21 @@ class ShopifyTargetService extends ShopifyClient {
     };
 
     const result = await this.query(mutation, variables);
+
+    // Log publish result including any errors
+    if (result.data.publishablePublish.userErrors?.length > 0) {
+      logger.error('Failed to publish product', {
+        productId,
+        userErrors: result.data.publishablePublish.userErrors
+      });
+    } else {
+      logger.info('Product published successfully', {
+        productId,
+        publicationId: onlineStore.node.id,
+        publishedAt: result.data.publishablePublish.publishable?.publishedAt
+      });
+    }
+
     return result.data.publishablePublish.publishable;
   }
 
