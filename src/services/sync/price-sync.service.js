@@ -202,6 +202,14 @@ class PriceSyncService {
       }
     }
 
+    // Log extracted price data for debugging
+    logger.info('Price data extracted from Magento', {
+      parentSku: priceData.parentSku,
+      isConfigurable: priceData.isConfigurable,
+      childCount: priceData.children.length,
+      childSkus: priceData.children.map(c => c.sku)
+    });
+
     return priceData;
   }
 
@@ -412,46 +420,79 @@ class PriceSyncService {
       { apiVersion: config.shopify.apiVersion }
     );
 
-    // Derive handle from SKU (lowercase, replace spaces with dashes)
-    const handle = priceData.parentSku.toLowerCase().replace(/\s+/g, '-');
+    const childSkus = priceData.children.map(c => c.sku);
 
-    // Lookup product by handle
-    const productData = await shopifyService.getProductVariants(handle);
-    if (!productData) {
-      throw new Error(`Product not found in Shopify store "${storeName}" with handle: ${handle}`);
+    logger.info('Looking up Shopify variants by child SKUs', {
+      parentSku: priceData.parentSku,
+      childSkus,
+      storeName
+    });
+
+    // Step 1: Look up all child variants by SKU directly
+    const variants = await shopifyService.getVariantsBySkus(childSkus);
+
+    if (variants.length === 0) {
+      throw new Error(`No variants found in Shopify store "${storeName}" for SKUs: ${childSkus.slice(0, 5).join(', ')}...`);
     }
 
-    const { productId, variants } = productData;
-
-    // Build variant prices array by mapping children SKUs to Shopify variant IDs
-    // Only sync variant (children) prices - parent products do not have prices
-    const variantPrices = [];
+    // Step 2: Group variants by product ID (they may belong to different products)
+    const variantsByProduct = new Map();
     for (const variant of variants) {
-      const childPrice = priceData.children.find(c => c.sku === variant.sku);
-      if (childPrice) {
+      const productId = variant.product.id;
+      if (!variantsByProduct.has(productId)) {
+        variantsByProduct.set(productId, []);
+      }
+      variantsByProduct.get(productId).push(variant);
+    }
+
+    // Step 3: Build variant prices array by matching Magento children to Shopify variants
+    const variantPrices = [];
+    for (const child of priceData.children) {
+      const variant = variants.find(v => v.sku === child.sku);
+      if (variant) {
         variantPrices.push({
           id: variant.id,
-          price: childPrice.price
+          price: child.price,
+          productId: variant.product.id
         });
       }
     }
 
+    logger.info('SKU matching complete', {
+      storeName,
+      matchedCount: variantPrices.length,
+      totalMagentoChildren: priceData.children.length,
+      unmatchedMagentoSkus: priceData.children
+        .filter(c => !variants.find(v => v.sku === c.sku))
+        .map(c => c.sku)
+    });
+
     if (variantPrices.length === 0) {
-      throw new Error(`No matching variants found for SKU mapping in Shopify store "${storeName}"`);
+      throw new Error(`No matching variants found in Shopify store "${storeName}"`);
     }
 
-    // Bulk update variant prices
-    const updateResult = await shopifyService.updateVariantPrices(productId, variantPrices);
+    // Step 4: Update prices grouped by product ID
+    let totalUpdated = 0;
+    for (const [productId, productVariants] of variantsByProduct) {
+      const pricesToUpdate = variantPrices
+        .filter(vp => vp.productId === productId)
+        .map(({ id, price }) => ({ id, price }));
+
+      if (pricesToUpdate.length > 0) {
+        const updateResult = await shopifyService.updateVariantPrices(productId, pricesToUpdate);
+        totalUpdated += updateResult.updatedCount;
+      }
+    }
 
     logger.info('Shopify prices updated', {
       sku: priceData.parentSku,
       storeName,
-      variantsUpdated: updateResult.updatedCount
+      variantsUpdated: totalUpdated
     });
 
     return {
       success: true,
-      variantsUpdated: updateResult.updatedCount
+      variantsUpdated: totalUpdated
     };
   }
 

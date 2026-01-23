@@ -553,7 +553,17 @@ class ShopifyTargetService extends ShopifyClient {
 
     try {
       const result = await this.query(query, { handle });
-      return result.data.productByHandle;
+      const product = result.data.productByHandle;
+
+      // Log response for debugging
+      logger.info('Shopify getProductByHandle response', {
+        handle,
+        found: !!product,
+        productId: product?.id || null,
+        variantCount: product?.variants?.edges?.length || 0
+      });
+
+      return product;
     } catch (error) {
       logger.debug('Product not found by handle', { handle });
       return null;
@@ -566,7 +576,7 @@ class ShopifyTargetService extends ShopifyClient {
     const product = await this.getProductByHandle(handle);
     if (!product) return null;
 
-    return {
+    const variantData = {
       productId: product.id,
       variants: product.variants?.edges?.map(e => ({
         id: e.node.id,
@@ -574,6 +584,62 @@ class ShopifyTargetService extends ShopifyClient {
         price: e.node.price
       })) || []
     };
+
+    // Log retrieved variants for debugging
+    logger.debug('Product variants retrieved', {
+      handle,
+      productId: variantData.productId,
+      variantCount: variantData.variants.length,
+      variantSkus: variantData.variants.map(v => v.sku)
+    });
+
+    return variantData;
+  }
+
+  /**
+   * Fetch variants by SKUs using the productVariants query.
+   * @param {Array<string>} skus - Array of SKUs to search for
+   * @returns {Array} Array of variant objects with id, sku, price, and product info
+   */
+  async getVariantsBySkus(skus) {
+    logger.info('Fetching variants by SKUs', { count: skus.length, skus });
+
+    // Build query string: "sku:SKU1 OR sku:SKU2 OR sku:SKU3"
+    const queryString = skus.map(sku => `sku:${sku}`).join(' OR ');
+
+    const query = `
+      query findVariantsBySkus($query: String!) {
+        productVariants(first: 100, query: $query) {
+          edges {
+            node {
+              id
+              sku
+              price
+              product {
+                id
+                title
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const result = await this.query(query, { query: queryString });
+      const variants = result.data.productVariants?.edges?.map(e => e.node) || [];
+
+      logger.info('Variants found by SKUs', {
+        requestedCount: skus.length,
+        foundCount: variants.length,
+        foundSkus: variants.map(v => v.sku)
+      });
+
+      return variants;
+    } catch (error) {
+      logger.error('Failed to fetch variants by SKUs', { error: error.message });
+      return [];
+    }
   }
 
   /**

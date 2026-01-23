@@ -25,3 +25,12 @@ target magento url: https://h79xmxgomfk7jkn.ejuices.com
 target magento toekn: 4z46rgyzcvh21xxzg3x200mm61e66bau
 
 testing SKU: TEST-ABC
+
+## Price Sync
+
+The price sync feature synchronizes prices from source Magento to target Magento and Shopify stores.
+
+**Shopify Price Sync:**
+- Searches Shopify directly by variant SKU using the `productVariants` GraphQL query
+- Does not rely on product handle derivation (which fails with special characters like commas)
+- Groups variants by product ID and updates prices in bulk per product
