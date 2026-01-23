@@ -58,10 +58,11 @@ class ShopifyClient {
   setupInterceptors() {
     this.client.interceptors.request.use(
       (config) => {
-        logger.debug('Shopify API Request', {
+        const fullUrl = `${config.baseURL}${config.url}`;
+        logger.info('Shopify API Request', {
           method: config.method?.toUpperCase(),
-          url: config.url,
-          baseURL: config.baseURL
+          url: fullUrl,
+          payload: config.data || null
         });
         return config;
       },
@@ -147,6 +148,12 @@ class ShopifyClient {
         throw new ShopifyAPIError(errorMessages, 400, userErrors);
       }
     }
+
+    // Debug log successful GraphQL response
+    logger.debug('Shopify GraphQL response', {
+      dataKeys: Object.keys(response.data.data || {}),
+      hasData: !!response.data.data
+    });
 
     return response.data;
   }

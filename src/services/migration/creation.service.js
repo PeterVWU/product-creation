@@ -417,13 +417,23 @@ class CreationService {
         : constants.MAGENTO_API.STATUS.DISABLED,
       visibility: constants.MAGENTO_API.VISIBILITY.NOT_VISIBLE,
       type_id: constants.MAGENTO_API.PRODUCT_TYPES.SIMPLE,
-      weight: sourceProduct.weight || 0,
+      weight: "0.1",
       custom_attributes: customAttributes
     };
 
     // Add website_ids if provided (for multi-store website assignment)
     if (options.websiteIds && options.websiteIds.length > 0) {
       productData.website_ids = options.websiteIds;
+    }
+
+    // Add stock_item from source product for inventory migration
+    const sourceStockItem = sourceProduct.extension_attributes?.stock_item;
+    if (sourceStockItem) {
+      productData.stock_item = {
+        qty: sourceStockItem.qty || 0,
+        is_in_stock: sourceStockItem.is_in_stock !== false,
+        manage_stock: sourceStockItem.manage_stock !== false
+      };
     }
 
     return productData;
@@ -459,7 +469,7 @@ class CreationService {
           : constants.MAGENTO_API.STATUS.DISABLED,
         visibility: constants.MAGENTO_API.VISIBILITY.CATALOG_SEARCH,
         type_id: constants.MAGENTO_API.PRODUCT_TYPES.CONFIGURABLE,
-        weight: parent.weight || 0,
+        weight: "0.1",
         custom_attributes: customAttributes
       };
 
@@ -467,6 +477,15 @@ class CreationService {
       if (options.websiteIds && options.websiteIds.length > 0) {
         productData.website_ids = options.websiteIds;
       }
+
+      // Add stock_item for configurable parent
+      // Configurable products typically don't manage their own stock (children do)
+      const parentStockItem = parent.extension_attributes?.stock_item;
+      productData.stock_item = {
+        qty: parentStockItem?.qty || 0,
+        is_in_stock: parentStockItem?.is_in_stock !== false,
+        manage_stock: parentStockItem?.manage_stock ?? false  // Default false for configurables
+      };
 
       // Add category_links from prepared category mapping
       if (preparedData.categoryMapping && Object.keys(preparedData.categoryMapping).length > 0) {
@@ -487,6 +506,9 @@ class CreationService {
       }
 
       const createdProduct = await this.targetService.createProduct(productData);
+
+      // Update weight separately to ensure it's saved (global-scope attribute)
+      await this.targetService.updateProductWeight(parent.sku, "0.1");
 
       let imagesUploaded = 0;
       if (options.includeImages && extractedData.images.parent.length > 0) {

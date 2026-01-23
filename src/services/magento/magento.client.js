@@ -50,10 +50,11 @@ class MagentoClient {
   setupInterceptors() {
     this.client.interceptors.request.use(
       (config) => {
-        logger.debug('Magento API Request', {
+        const fullUrl = `${config.baseURL}${config.url}`;
+        logger.info('Magento API Request', {
           method: config.method?.toUpperCase(),
-          url: config.url,
-          baseURL: config.baseURL
+          url: fullUrl,
+          payload: config.data || null
         });
         return config;
       },

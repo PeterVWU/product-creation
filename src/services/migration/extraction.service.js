@@ -37,11 +37,18 @@ class ExtractionService {
 
       const images = this.extractImages(parent, children);
 
+      // Extract categories as array of {id, name} objects for preparation service
+      const categories = Object.entries(translations.categories || {}).map(([id, name]) => ({
+        id: parseInt(id, 10),
+        name
+      }));
+
       const duration = Date.now() - startTime;
       logger.info('Extraction phase completed', {
         sku,
         duration: `${duration}ms`,
-        childrenFound: children.length
+        childrenFound: children.length,
+        categoriesFound: categories.length
       });
 
       return {
@@ -50,9 +57,11 @@ class ExtractionService {
         childLinks,
         translations,
         images,
+        categories,
         metadata: {
           duration,
           childrenFound: children.length,
+          categoriesFound: categories.length,
           extractedAt: new Date().toISOString()
         }
       };

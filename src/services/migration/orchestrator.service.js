@@ -5,6 +5,7 @@ const TargetService = require('../magento/target.service');
 const ExtractionService = require('./extraction.service');
 const PreparationService = require('./preparation.service');
 const CreationService = require('./creation.service');
+const CategoryMappingService = require('../category-mapping.service');
 const GoogleChatService = require('../notification/google-chat.service');
 const { validateStoreCodes, normalizeStoreCodes, mergeStoreResults } = require('../../utils/store-scope-helpers');
 
@@ -30,8 +31,9 @@ class OrchestratorService {
       defaultStoreCodes: config.target.storeCodes
     };
 
+    this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
-    this.preparationService = new PreparationService(this.targetService);
+    this.preparationService = new PreparationService(this.targetService, this.categoryMappingService);
     this.creationService = new CreationService(this.sourceService, this.targetService);
     this.googleChatService = new GoogleChatService();
   }

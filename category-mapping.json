@@ -1,0 +1,32 @@
+{
+  "mappings": [
+    { "source": "Replacement Glass", "shopify": "Replacement Glass", "targetMagento": "Replacement Glass" },
+    { "source": "Chargers", "shopify": "Chargers", "targetMagento": "Chargers" },
+    { "source": "Batteries", "shopify": "Batteries", "targetMagento": "Batteries" },
+    { "source": "Accessories", "shopify": "Accessories", "targetMagento": "Vaping Accessories" },
+    { "source": "Alternatives", "shopify": "Alternatives", "targetMagento": "Alternatives" },
+    { "source": "Rebuildables", "shopify": "Rebuildables", "targetMagento": "Rebuildables" },
+    { "source": "Pod System Kits", "shopify": "Pod Systems", "targetMagento": "Vape Kits" },
+    { "source": "Mods", "shopify": "Mods", "targetMagento": "Mods" },
+    { "source": "Starter Kits & Mods", "shopify": "Starter Kits", "targetMagento": "Starter Kits" },
+    { "source": "Pod Mod Systems", "shopify": "Pod Systems", "targetMagento": "Vape Kits" },
+    { "source": "Box Mod Kits", "shopify": "Starter Kits", "targetMagento": "Starter Kits" },
+    { "source": "Tanks", "shopify": "Atomizers", "targetMagento": "Tanks" },
+    { "source": "Nicotine Pouches", "shopify": "Nicotine Pouches", "targetMagento": "Nicotine Pouches" },
+    { "source": "Nicotine Gum", "shopify": "Nicotine Pouches", "targetMagento": "Nicotine Gum" },
+    { "source": "Replacement Coils", "shopify": "Coils", "targetMagento": "Replacement Coils" },
+    { "source": "Replacement Pod Cartridges", "shopify": "Replacement Pods", "targetMagento": "Replacement Pods" },
+    { "source": "Nic Pouches", "shopify": "Nicotine Pouches", "targetMagento": "Nicotine Pouches" },
+    { "source": "Disposables", "shopify": "Disposables", "targetMagento": "Disposables" },
+    { "source": "E-Liquids", "shopify": "E-Liquid", "targetMagento": "E-Liquids" },
+    { "source": "Salt Nicotine", "shopify": "E-Liquid", "targetMagento": "Nic Salts" },
+    { "source": "100ml Juices", "shopify": "E-Liquid", "targetMagento": "100mL E-Juice" },
+    { "source": "Synthetic Nicotine", "shopify": "E-Liquid", "targetMagento": "Synthetic Nicotine" },
+    { "source": "Herb Grinders", "shopify": "Alternatives", "targetMagento": "Herb Grinders" },
+    { "source": "Smoke Shop Supplies", "shopify": "Alternatives", "targetMagento": "Smoke Shop Supplies" },
+    { "source": "Glass", "shopify": "Alternatives", "targetMagento": "Glass Pieces" },
+    { "source": "Alt Vape Accessories", "shopify": "Alternatives", "targetMagento": "Alt Vaporizers & Accessories" },
+    { "source": "Cotton", "shopify": "Accessories", "targetMagento": "Cotton" },
+    { "source": "Drip Tips", "shopify": "Accessories", "targetMagento": "Drip Tips" }
+  ]
+}

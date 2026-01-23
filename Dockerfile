@@ -23,6 +23,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy application source code
 COPY src ./src
 
+# Copy category mapping configuration
+COPY category-mapping.json ./
+
 # Create logs directory and set permissions
 RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app
 

@@ -2,8 +2,9 @@ const logger = require('../../config/logger');
 const { PreparationError } = require('../../utils/error-handler');
 
 class PreparationService {
-  constructor(targetService) {
+  constructor(targetService, categoryMappingService = null) {
     this.targetService = targetService;
+    this.categoryMappingService = categoryMappingService;
   }
 
   async prepareTarget(extractedData) {
@@ -30,10 +31,16 @@ class PreparationService {
 
       result.customAttributeMapping = extractedData.translations.customAttributes;
 
+      // Prepare category mappings if categories are available and mapping service is configured
+      if (extractedData.categories && extractedData.categories.length > 0) {
+        result.categoryMapping = await this.prepareCategories(extractedData.categories);
+      }
+
       const duration = Date.now() - startTime;
       logger.info('Preparation phase completed', {
         duration: `${duration}ms`,
-        attributesProcessed: Object.keys(result.attributeMapping).length
+        attributesProcessed: Object.keys(result.attributeMapping).length,
+        categoriesMapped: Object.keys(result.categoryMapping).length
       });
 
       return result;
@@ -151,6 +158,68 @@ class PreparationService {
     }
 
     return groups;
+  }
+
+  /**
+   * Prepare category mappings from source categories to target category IDs.
+   * Uses the CategoryMappingService to map source category names to target names,
+   * then looks up target category IDs via the Magento API.
+   * @param {Array} sourceCategories - Array of source category objects with 'name' property
+   * @returns {Object} - Mapping of source category names to target category IDs
+   */
+  async prepareCategories(sourceCategories) {
+    logger.info('Preparing category mappings', {
+      count: sourceCategories.length
+    });
+
+    const categoryMapping = {};
+
+    if (!sourceCategories || sourceCategories.length === 0) {
+      return categoryMapping;
+    }
+
+    // Extract source category names
+    const sourceCategoryNames = sourceCategories.map(cat => cat.name);
+
+    // Get target category names using the mapping service
+    let targetCategoryNames;
+    if (this.categoryMappingService) {
+      targetCategoryNames = this.categoryMappingService.getTargetMagentoCategories(sourceCategoryNames);
+    } else {
+      // If no mapping service, pass through unchanged
+      targetCategoryNames = sourceCategoryNames;
+    }
+
+    logger.debug('Mapped source categories to target names', {
+      sourceNames: sourceCategoryNames,
+      targetNames: targetCategoryNames
+    });
+
+    // Look up target category IDs
+    for (const targetName of targetCategoryNames) {
+      try {
+        const categoryId = await this.targetService.getCategoryIdByName(targetName);
+
+        if (categoryId) {
+          categoryMapping[targetName] = categoryId;
+          logger.debug('Category ID resolved', { name: targetName, id: categoryId });
+        } else {
+          logger.warn('Target category not found', { name: targetName });
+        }
+      } catch (error) {
+        logger.warn('Failed to look up category', {
+          name: targetName,
+          error: error.message
+        });
+      }
+    }
+
+    logger.info('Category mapping complete', {
+      sourceCategoriesCount: sourceCategories.length,
+      targetCategoriesMapped: Object.keys(categoryMapping).length
+    });
+
+    return categoryMapping;
   }
 }
 

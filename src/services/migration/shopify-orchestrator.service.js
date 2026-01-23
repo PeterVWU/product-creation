@@ -4,6 +4,7 @@ const SourceService = require('../magento/source.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
 const ExtractionService = require('./extraction.service');
 const ShopifyCreationService = require('./shopify-creation.service');
+const CategoryMappingService = require('../category-mapping.service');
 const GoogleChatService = require('../notification/google-chat.service');
 
 class ShopifyOrchestratorService {
@@ -15,6 +16,7 @@ class ShopifyOrchestratorService {
       config.api
     );
 
+    this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
     this.googleChatService = new GoogleChatService();
 
@@ -91,12 +93,35 @@ class ShopifyOrchestratorService {
 
       // Phase 2: Create in Shopify (no preparation phase needed)
       const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
-      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService);
+      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService);
 
-      // Auto-detect if product already exists on Shopify
-      const handle = creationService.slugify(extractedData.parent.sku);
-      const existingProduct = await shopifyTargetService.getProductVariants(handle);
+      // Auto-detect if product already exists on Shopify by searching for child variant SKUs
       const hasChildren = extractedData.children && extractedData.children.length > 0;
+      let existingProduct = null;
+
+      if (hasChildren) {
+        const childSkus = extractedData.children.map(c => c.sku);
+        const existingVariants = await shopifyTargetService.getVariantsBySkus(childSkus);
+
+        if (existingVariants.length > 0) {
+          // Found existing variants - extract product info
+          const productId = existingVariants[0].product.id;
+          existingProduct = {
+            productId,
+            variants: existingVariants.map(v => ({
+              id: v.id,
+              sku: v.sku,
+              price: v.price
+            }))
+          };
+
+          logger.info('Found existing Shopify product by variant SKUs', {
+            sku: extractedData.parent.sku,
+            productId,
+            matchedVariants: existingVariants.length
+          });
+        }
+      }
 
       if (existingProduct && hasChildren) {
         // Product exists - check for missing variants
@@ -105,7 +130,7 @@ class ShopifyOrchestratorService {
 
         logger.info('Auto-detected existing Shopify product', {
           sku,
-          handle,
+          productId: existingProduct.productId,
           existingVariants: existingSkus.length,
           sourceVariants: extractedData.children.length,
           missingVariants: missingChildren.length
@@ -121,7 +146,7 @@ class ShopifyOrchestratorService {
           migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
           migrationContext.summary.message = 'All variants already exist on Shopify';
 
-          logger.info('All variants already exist on Shopify, skipping migration', { sku, handle });
+          logger.info('All variants already exist on Shopify, skipping migration', { sku, productId: existingProduct.productId });
           await this.googleChatService.notifyMigrationEnd(migrationContext);
           return migrationContext;
         }
@@ -254,7 +279,7 @@ class ShopifyOrchestratorService {
     try {
       logger.info('Executing Shopify creation phase', { options });
 
-      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService);
+      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService);
       const creationResult = await creationService.createProducts(extractedData, options);
 
       context.phases.creation.success = creationResult.success;
