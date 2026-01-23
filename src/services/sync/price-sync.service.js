@@ -431,6 +431,17 @@ class PriceSyncService {
     // Step 1: Look up all child variants by SKU directly
     const variants = await shopifyService.getVariantsBySkus(childSkus);
 
+    // Log full variant data including compareAtPrice
+    logger.info('Shopify variants retrieved with pricing data', {
+      storeName,
+      variants: variants.map(v => ({
+        sku: v.sku,
+        price: v.price,
+        compareAtPrice: v.compareAtPrice,
+        hasCompareAt: v.compareAtPrice !== null
+      }))
+    });
+
     if (variants.length === 0) {
       throw new Error(`No variants found in Shopify store "${storeName}" for SKUs: ${childSkus.slice(0, 5).join(', ')}...`);
     }
@@ -446,15 +457,28 @@ class PriceSyncService {
     }
 
     // Step 3: Build variant prices array by matching Magento children to Shopify variants
+    // If variant has compareAtPrice, update compareAtPrice only (preserve sale price)
+    // If no compareAtPrice, update regular price
     const variantPrices = [];
     for (const child of priceData.children) {
       const variant = variants.find(v => v.sku === child.sku);
       if (variant) {
+        const hasCompareAt = variant.compareAtPrice !== null;
         variantPrices.push({
           id: variant.id,
           price: child.price,
-          productId: variant.product.id
+          productId: variant.product.id,
+          updateCompareAt: hasCompareAt
         });
+
+        if (hasCompareAt) {
+          logger.debug('Variant has compareAtPrice, will update compareAtPrice only', {
+            sku: child.sku,
+            currentCompareAt: variant.compareAtPrice,
+            currentPrice: variant.price,
+            newCompareAt: child.price
+          });
+        }
       }
     }
 
@@ -476,7 +500,19 @@ class PriceSyncService {
     for (const [productId, productVariants] of variantsByProduct) {
       const pricesToUpdate = variantPrices
         .filter(vp => vp.productId === productId)
-        .map(({ id, price }) => ({ id, price }));
+        .map(({ id, price, updateCompareAt }) => ({ id, price, updateCompareAt }));
+
+      // Log what we're about to update
+      logger.info('Preparing variant price update', {
+        storeName,
+        productId,
+        updates: pricesToUpdate.map(p => ({
+          id: p.id,
+          newPrice: p.price,
+          updateCompareAt: p.updateCompareAt,
+          field: p.updateCompareAt ? 'compareAtPrice' : 'price'
+        }))
+      });
 
       if (pricesToUpdate.length > 0) {
         const updateResult = await shopifyService.updateVariantPrices(productId, pricesToUpdate);

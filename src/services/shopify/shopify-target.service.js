@@ -615,6 +615,7 @@ class ShopifyTargetService extends ShopifyClient {
               id
               sku
               price
+              compareAtPrice
               product {
                 id
                 title
@@ -672,7 +673,9 @@ class ShopifyTargetService extends ShopifyClient {
 
     const variants = variantPrices.map(v => ({
       id: v.id,
-      price: String(v.price)
+      ...(v.updateCompareAt
+        ? { compareAtPrice: String(v.price) }
+        : { price: String(v.price) })
     }));
 
     const variables = {
