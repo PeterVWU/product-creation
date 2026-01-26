@@ -13,7 +13,8 @@ router.get('/', (req, res) => {
       health: '/api/v1/health',
       magentoHealth: '/api/v1/health/magento',
       migrateProduct: 'POST /api/v1/migrate/product',
-      migrateBatch: 'POST /api/v1/migrate/products/batch'
+      migrateBatch: 'POST /api/v1/migrate/products/batch',
+      generateDescription: 'POST /api/v1/products/generate-description'
     }
   });
 });
