@@ -59,6 +59,10 @@ services:
       - SHOPIFY_STORE_RODMAN_URL=${SHOPIFY_STORE_RODMAN_URL}
       - SHOPIFY_STORE_RODMAN_TOKEN=${SHOPIFY_STORE_RODMAN_TOKEN}
 
+      # OpenAI Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+
     volumes:
       # Persist logs outside container
       - ./logs:/app/logs
