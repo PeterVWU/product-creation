@@ -5,7 +5,8 @@ const {
   ExtractionError,
   PreparationError,
   CreationError,
-  ImageProcessingError
+  ImageProcessingError,
+  DescriptionGenerationError
 } = require('../utils/error-handler');
 
 const errorMiddleware = (err, req, res, next) => {
@@ -43,6 +44,17 @@ const errorMiddleware = (err, req, res, next) => {
       success: false,
       error: err.name,
       message: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.details : undefined
+    });
+  }
+
+  if (err instanceof DescriptionGenerationError) {
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      error: {
+        code: err.code,
+        message: err.message
+      },
       details: process.env.NODE_ENV === 'development' ? err.details : undefined
     });
   }
