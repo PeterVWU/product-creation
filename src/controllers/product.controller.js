@@ -2,7 +2,14 @@ const logger = require('../config/logger');
 const DescriptionService = require('../services/description.service');
 const { ValidationError } = require('../utils/error-handler');
 
-const descriptionService = new DescriptionService();
+let descriptionService = null;
+
+const getDescriptionService = () => {
+  if (!descriptionService) {
+    descriptionService = new DescriptionService();
+  }
+  return descriptionService;
+};
 
 const generateDescription = async (req, res, next) => {
   try {
@@ -14,7 +21,7 @@ const generateDescription = async (req, res, next) => {
 
     logger.info('Generate description request received', { sku });
 
-    const result = await descriptionService.generateAndUpdateDescription(sku);
+    const result = await getDescriptionService().generateAndUpdateDescription(sku);
 
     res.status(200).json({
       success: true,
