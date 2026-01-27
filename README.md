@@ -478,6 +478,15 @@ curl -X POST http://localhost:3000/api/v1/sync/prices \
 
 **Note:** Price sync uses scoped Magento API endpoints (`/rest/{storeCode}/V1/products`) to ensure prices are updated for each store view individually. Non-scoped updates only affect the global/default price and don't propagate to store views with existing price overrides.
 
+**Tier Pricing (Wholesale):** You can configure specific stores to use tier prices (e.g., wholesale pricing) instead of base prices. Set the `PRICE_SYNC_STORE_GROUP_MAP` environment variable to map store names to Magento customer group IDs:
+
+```env
+# Format: store1:groupId1,store2:groupId2
+PRICE_SYNC_STORE_GROUP_MAP=ejuicesco:2,wholesale:3
+```
+
+When syncing prices to a mapped store, the service will use the tier price for that customer group (with qty=1) if available, falling back to the base price if no tier price exists. Unmapped stores always use the base price.
+
 ### Generate Product Description
 
 **POST** `/api/v1/products/generate-description`
@@ -923,6 +932,9 @@ CONTINUE_ON_ERROR=true
 # OpenAI (for AI-powered descriptions)
 OPENAI_API_KEY=sk-your-api-key-here
 OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
+
+# Price Sync
+PRICE_SYNC_STORE_GROUP_MAP=ejuicesco:2  # Optional: map stores to customer group IDs for tier pricing
 ```
 
 ## Google Chat Notifications

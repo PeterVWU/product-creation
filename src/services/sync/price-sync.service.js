@@ -189,7 +189,8 @@ class PriceSyncService {
           if (child) {
             priceData.children.push({
               sku: child.sku,
-              price: child.price
+              price: child.price,
+              tierPrices: child.tier_prices || []
             });
           }
         } catch (error) {
@@ -333,16 +334,35 @@ class PriceSyncService {
       ? this.targetService.createScopedInstance(storeCode)
       : this.targetService;
 
+    // Check if this store has a mapped customer group for tier pricing
+    const groupId = storeCode ? config.priceSync.storeGroupMapping[storeCode.toLowerCase()] : null;
+
+    if (groupId) {
+      logger.info('Using tier pricing for store', {
+        storeCode,
+        customerGroupId: groupId
+      });
+    }
+
     let variantsUpdated = 0;
 
     // Update variant (children) prices only - parent products do not have prices
     for (const child of priceData.children) {
       try {
-        await service.updateProductPrice(child.sku, child.price);
+        // Use tier price for mapped stores, fall back to base price
+        const price = groupId
+          ? this.getTierPrice(child, groupId) || child.price
+          : child.price;
+
+        const usedTierPrice = groupId && price !== child.price;
+
+        await service.updateProductPrice(child.sku, price);
         variantsUpdated++;
         logger.debug('Variant price updated', {
           sku: child.sku,
-          price: child.price,
+          price,
+          basePrice: child.price,
+          usedTierPrice,
           storeCode: storeCode || 'default'
         });
       } catch (error) {
@@ -359,6 +379,35 @@ class PriceSyncService {
       success: true,
       variantsUpdated
     };
+  }
+
+  /**
+   * Get tier price for a specific customer group
+   * @param {Object} child - Child product data with tierPrices array
+   * @param {number} groupId - Customer group ID
+   * @returns {number|null} Tier price for the group, or null if not found
+   */
+  getTierPrice(child, groupId) {
+    if (!child.tierPrices || !Array.isArray(child.tierPrices)) {
+      return null;
+    }
+
+    // Find tier price for the specific customer group with qty=1
+    const tierPrice = child.tierPrices.find(
+      tp => tp.customer_group_id === groupId && tp.qty === 1
+    );
+
+    if (tierPrice) {
+      logger.debug('Found tier price for customer group', {
+        sku: child.sku,
+        groupId,
+        tierPrice: tierPrice.value,
+        basePrice: child.price
+      });
+      return tierPrice.value;
+    }
+
+    return null;
   }
 
   /**
@@ -420,6 +469,15 @@ class PriceSyncService {
       { apiVersion: config.shopify.apiVersion }
     );
 
+    // Check if this store has a mapped customer group for tier pricing
+    const groupId = config.priceSync.storeGroupMapping[storeName.toLowerCase()];
+    if (groupId) {
+      logger.info('Using tier pricing for Shopify store', {
+        storeName,
+        customerGroupId: groupId
+      });
+    }
+
     const childSkus = priceData.children.map(c => c.sku);
 
     logger.info('Looking up Shopify variants by child SKUs', {
@@ -463,20 +521,34 @@ class PriceSyncService {
     for (const child of priceData.children) {
       const variant = variants.find(v => v.sku === child.sku);
       if (variant) {
+        // Use tier price for mapped stores, fall back to base price
+        const price = groupId
+          ? (this.getTierPrice(child, groupId) || child.price)
+          : child.price;
+
         const hasCompareAt = variant.compareAtPrice !== null;
         variantPrices.push({
           id: variant.id,
-          price: child.price,
+          price,
           productId: variant.product.id,
           updateCompareAt: hasCompareAt
         });
+
+        if (groupId && price !== child.price) {
+          logger.debug('Using tier price for variant', {
+            sku: child.sku,
+            tierPrice: price,
+            basePrice: child.price,
+            customerGroupId: groupId
+          });
+        }
 
         if (hasCompareAt) {
           logger.debug('Variant has compareAtPrice, will update compareAtPrice only', {
             sku: child.sku,
             currentCompareAt: variant.compareAtPrice,
             currentPrice: variant.price,
-            newCompareAt: child.price
+            newCompareAt: price
           });
         }
       }
