@@ -188,13 +188,28 @@ class ShopifyCreationService {
       const existingProduct = await this.shopifyTargetService.getProductById(existingProductId);
       const existingOptionNames = (existingProduct?.options || []).map(o => o.name);
 
+      // Build a map of option name -> existing values for value matching
+      const existingOptionValues = {};
+      for (const option of (existingProduct?.options || [])) {
+        existingOptionValues[option.name] = option.values || [];
+      }
+
       logger.info('Existing Shopify product options', {
         productId: existingProductId,
-        options: existingOptionNames
+        options: existingOptionNames,
+        optionValues: existingOptionValues
       });
 
       // Build variant data for new children, filtering to only existing options
-      const variants = this.buildVariantsForSet(newChildren, translations, [], {}, existingOptionNames);
+      // and matching values to existing ones
+      const variants = this.buildVariantsForSet(
+        newChildren,
+        translations,
+        [],
+        {},
+        existingOptionNames,
+        existingOptionValues  // Pass existing values for matching
+      );
 
       logger.info('Creating new variants in Shopify', {
         productId: existingProductId,
@@ -368,7 +383,7 @@ class ShopifyCreationService {
     return options;
   }
 
-  buildVariantsForSet(children, translations, fileIds = [], skuToFileIndex = {}, allowedOptionNames = null) {
+  buildVariantsForSet(children, translations, fileIds = [], skuToFileIndex = {}, allowedOptionNames = null, existingOptionValues = null) {
     const variants = [];
     const skippedVariants = [];
 
@@ -394,9 +409,21 @@ class ShopifyCreationService {
             const valueData = translations.attributeValues?.[compositeKey];
 
             if (valueData && valueData.label) {
+              const optionName = this.formatOptionName(attr.attribute_code);
+              let valueName = valueData.label;
+
+              // Match to existing target values if available
+              if (existingOptionValues && existingOptionValues[optionName]) {
+                valueName = this.matchOptionValueToExisting(
+                  optionName,
+                  valueData.label,
+                  existingOptionValues[optionName]
+                );
+              }
+
               optionValues.push({
-                optionName: this.formatOptionName(attr.attribute_code),
-                name: valueData.label
+                optionName: optionName,
+                name: valueName
               });
             }
           }
@@ -727,6 +754,56 @@ class ShopifyCreationService {
     return name
       .replace(/_/g, ' ')
       .replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  /**
+   * Normalize a "unit per pack" value for comparison.
+   * Converts "5 pack", "5-pack", "5 Pack", "5-Pack" all to "5-pack" for matching.
+   * @param {string} value - The value to normalize
+   * @returns {string} Normalized value in lowercase with hyphen format
+   */
+  normalizeUnitPerPackValue(value) {
+    if (typeof value !== 'string') return value;
+    // Normalize: lowercase, replace spaces with hyphens, collapse multiple hyphens
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  /**
+   * Match a source option value to an existing target option value.
+   * For "Unit Per Pack" option, uses normalization to handle "5 pack" vs "5-pack" differences.
+   * @param {string} optionName - The option name (e.g., "Unit Per Pack")
+   * @param {string} sourceValue - The value from source (e.g., "5 pack")
+   * @param {Array<string>} existingValues - Existing values on target (e.g., ["5-pack", "10-pack"])
+   * @returns {string} The matched existing value, or the original source value if no match
+   */
+  matchOptionValueToExisting(optionName, sourceValue, existingValues) {
+    if (!existingValues || existingValues.length === 0) {
+      return sourceValue;
+    }
+
+    // Check for exact match first
+    if (existingValues.includes(sourceValue)) {
+      return sourceValue;
+    }
+
+    // For "Unit Per Pack" option, use normalized matching
+    if (optionName.toLowerCase() === 'unit per pack') {
+      const normalizedSource = this.normalizeUnitPerPackValue(sourceValue);
+
+      for (const existingValue of existingValues) {
+        const normalizedExisting = this.normalizeUnitPerPackValue(existingValue);
+        if (normalizedSource === normalizedExisting) {
+          return existingValue; // Return the existing target value
+        }
+      }
+    }
+
+    // No match found, return original
+    return sourceValue;
   }
 }
 
