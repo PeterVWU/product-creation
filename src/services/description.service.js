@@ -6,14 +6,16 @@ const { DescriptionGenerationError } = require('../utils/error-handler');
 
 const PROMPT_TEMPLATE = `Write a 5 sentence description for {title}. This is a web listing that should be seo-optimized. Voice should be informative and professional, emphasizing key product features.
 
-Reference the flavor list below for a concise flavor description for each of the following using vivid and highly sensuous language in a simple bulleted list format. Bold the flavor names. Reference example format attached. Also include a features section based on your findings.
-
-Include 15 SEO keywords relevant to this product at the end.
+Reference the flavor list below for a concise flavor description for each of the following using vivid and highly sensuous language in a simple bulleted list format. Bold the flavor names. Also include a features section based on your findings.
 
 FLAVORS:
 {flavors}
 
-Example:
+Return your response as a JSON object with two fields:
+1. "description": The HTML content (see example format below)
+2. "keywords": A comma-separated string of 15 SEO keywords relevant to this product
+
+Example description HTML format:
 <div><h2>Nexa Ultra V2 50K Puffs Disposable Vape</h2></div>
 <div>
     <p>"Experience next-level vaping with the Nexa Ultra V2 50K Puffs Disposable Vape Device, engineered for performance, longevity, and an unmatched flavor experience. Boasting an impressive 50,000 puff capacity, this powerhouse is built for extended use, supported by a reliable 900mAh rechargeable battery that ensures consistent output across sessions. The device offers customizable inhalation with both Normal and Boost Modes, letting users switch between smooth draws and more intense hits depending on their preference. A dynamic LED screen provides real-time updates on battery life, puff count, and mode selection, all easily viewable in any lighting condition thanks to its innovative Dark Mode feature. Choose from a wide array of vibrant, expertly blended flavors that deliver rich, layered profiles with every puff, making the Nexa Ultra V2 a standout choice for discerning vapers seeking both style and substance.</p>
@@ -29,15 +31,19 @@ Example:
         <li>Up to 50,000 Puffs</li>
         <li>900mAh Rechargeable Battery</li>
     </ul>
-</div>`;
+</div>
+
+Respond ONLY with the JSON object, no other text.`;
 
 const PROMPT_TEMPLATE_NO_FLAVORS = `Write a 5 sentence description for {title}. This is a web listing that should be seo-optimized. Voice should be informative and professional, emphasizing key product features.
 
 Also include a features section based on your findings.
 
-Include 15 SEO keywords relevant to this product at the end.
+Return your response as a JSON object with two fields:
+1. "description": The HTML content with a <div> wrapper containing a <p> for the description and a <ul> for features
+2. "keywords": A comma-separated string of 15 SEO keywords relevant to this product
 
-Format the output as HTML with a <div> wrapper containing a <p> for the description and a <ul> for features.`;
+Respond ONLY with the JSON object, no other text.`;
 
 class DescriptionService {
   constructor() {
@@ -76,20 +82,52 @@ class DescriptionService {
 
     // Step 4: Build prompt and generate description
     const prompt = this.buildPrompt(title, flavors);
-    const description = await this.openaiClient.generateDescription(prompt);
-    logger.info('Description generated', { sku, length: description.length });
+    const response = await this.openaiClient.generateDescription(prompt);
+    const { description, keywords } = this.parseAIResponse(response);
+    logger.info('Description generated', { sku, descriptionLength: description.length, keywordsLength: keywords.length });
 
-    // Step 5: Update product with new description
-    await this.updateProductDescription(sku, description);
-    logger.info('Product description updated', { sku });
+    // Step 5: Update product with description and meta keywords
+    await this.updateProduct(sku, description, keywords);
+    logger.info('Product updated', { sku });
 
     return {
       sku,
       title,
       flavorsFound: flavors.length,
       description,
+      keywords,
       updatedAt: new Date().toISOString()
     };
+  }
+
+  parseAIResponse(response) {
+    try {
+      // Try to parse as JSON directly
+      let parsed = JSON.parse(response);
+      return {
+        description: parsed.description || '',
+        keywords: parsed.keywords || ''
+      };
+    } catch (e) {
+      // If JSON parsing fails, try to extract JSON from the response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            description: parsed.description || '',
+            keywords: parsed.keywords || ''
+          };
+        } catch (e2) {
+          logger.warn('Failed to parse AI response as JSON', { response: response.substring(0, 200) });
+        }
+      }
+      // Fallback: return entire response as description, no keywords
+      return {
+        description: response,
+        keywords: ''
+      };
+    }
   }
 
   buildFlavorMap(flavorOptions) {
@@ -131,16 +169,25 @@ class DescriptionService {
       .replace('{flavors}', flavorsList);
   }
 
-  async updateProductDescription(sku, description) {
+  async updateProduct(sku, description, keywords) {
+    const customAttributes = [
+      {
+        attribute_code: 'description',
+        value: description
+      }
+    ];
+
+    if (keywords) {
+      customAttributes.push({
+        attribute_code: 'meta_keyword',
+        value: keywords
+      });
+    }
+
     const payload = {
       product: {
         sku,
-        custom_attributes: [
-          {
-            attribute_code: 'description',
-            value: description
-          }
-        ]
+        custom_attributes: customAttributes
       }
     };
 
@@ -151,7 +198,7 @@ class DescriptionService {
       );
     } catch (error) {
       throw new DescriptionGenerationError(
-        'Failed to update product description',
+        'Failed to update product',
         'UPDATE_FAILED',
         502,
         { originalError: error.message }
