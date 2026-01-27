@@ -14,7 +14,7 @@ FLAVORS:
 {flavors}
 
 Example:
-<div>Nexa Ultra V2 50K Puffs Disposable Vape</div>
+<div><h2>Nexa Ultra V2 50K Puffs Disposable Vape</h2></div>
 <div>
     <p>"Experience next-level vaping with the Nexa Ultra V2 50K Puffs Disposable Vape Device, engineered for performance, longevity, and an unmatched flavor experience. Boasting an impressive 50,000 puff capacity, this powerhouse is built for extended use, supported by a reliable 900mAh rechargeable battery that ensures consistent output across sessions. The device offers customizable inhalation with both Normal and Boost Modes, letting users switch between smooth draws and more intense hits depending on their preference. A dynamic LED screen provides real-time updates on battery life, puff count, and mode selection, all easily viewable in any lighting condition thanks to its innovative Dark Mode feature. Choose from a wide array of vibrant, expertly blended flavors that deliver rich, layered profiles with every puff, making the Nexa Ultra V2 a standout choice for discerning vapers seeking both style and substance.</p>
 
@@ -64,17 +64,22 @@ class DescriptionService {
     const title = product.name;
     logger.info('Product found', { sku, title });
 
-    // Step 2: Get configurable children and extract flavors
+    // Step 2: Get flavor attribute options for ID-to-label mapping
+    const flavorOptions = await this.sourceService.getAttributeOptions('flavor');
+    const flavorMap = this.buildFlavorMap(flavorOptions);
+    logger.debug('Flavor options loaded', { count: flavorOptions.length });
+
+    // Step 3: Get configurable children and extract flavors
     const children = await this.sourceService.getConfigurableChildren(sku);
-    const flavors = this.extractFlavors(children);
+    const flavors = this.extractFlavors(children, flavorMap);
     logger.info('Flavors extracted', { sku, count: flavors.length });
 
-    // Step 3: Build prompt and generate description
+    // Step 4: Build prompt and generate description
     const prompt = this.buildPrompt(title, flavors);
     const description = await this.openaiClient.generateDescription(prompt);
     logger.info('Description generated', { sku, length: description.length });
 
-    // Step 4: Update product with new description
+    // Step 5: Update product with new description
     await this.updateProductDescription(sku, description);
     logger.info('Product description updated', { sku });
 
@@ -87,7 +92,17 @@ class DescriptionService {
     };
   }
 
-  extractFlavors(children) {
+  buildFlavorMap(flavorOptions) {
+    const map = new Map();
+    for (const option of flavorOptions) {
+      if (option.value && option.label) {
+        map.set(option.value, option.label);
+      }
+    }
+    return map;
+  }
+
+  extractFlavors(children, flavorMap) {
     const flavors = [];
 
     for (const child of children) {
@@ -95,9 +110,9 @@ class DescriptionService {
       const flavorAttr = customAttributes.find(attr => attr.attribute_code === 'flavor');
 
       if (flavorAttr && flavorAttr.value) {
-        // Value could be the label or an ID - we want the label
-        // If it's a number, we'd need to look up the label, but typically it's already the label
-        flavors.push(flavorAttr.value);
+        // Look up the label from the flavor map
+        const label = flavorMap.get(flavorAttr.value) || flavorAttr.value;
+        flavors.push(label);
       }
     }
 
