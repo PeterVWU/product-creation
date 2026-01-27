@@ -63,6 +63,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
 
+      # Price Sync Configuration
+      - PRICE_SYNC_STORE_GROUP_MAP=${PRICE_SYNC_STORE_GROUP_MAP}
+
     volumes:
       # Persist logs outside container
       - ./logs:/app/logs
