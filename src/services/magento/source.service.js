@@ -12,6 +12,16 @@ class SourceService extends MagentoClient {
     return await this.get(`/rest/V1/products/${encodeURIComponent(sku)}`);
   }
 
+  async getConfigurableChildren(parentSku) {
+    logger.debug('Fetching configurable children from source', { parentSku });
+    try {
+      return await this.get(`/rest/V1/configurable-products/${encodeURIComponent(parentSku)}/children`);
+    } catch (error) {
+      logger.warn('Failed to fetch configurable children', { parentSku, error: error.message });
+      return [];
+    }
+  }
+
   async getSimpleProducts(skus) {
     logger.info('Fetching simple products from source', { count: skus.length });
     const products = [];

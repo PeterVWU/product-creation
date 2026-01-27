@@ -1,5 +1,5 @@
 const OpenAIClient = require('./ai/openai.client');
-const TargetService = require('./magento/target.service');
+const SourceService = require('./magento/source.service');
 const config = require('../config');
 const logger = require('../config/logger');
 const { DescriptionGenerationError } = require('../utils/error-handler');
@@ -42,17 +42,17 @@ Format the output as HTML with a <div> wrapper containing a <p> for the descript
 class DescriptionService {
   constructor() {
     this.openaiClient = new OpenAIClient();
-    this.targetService = new TargetService(
-      config.target.baseUrl,
-      config.target.token
+    this.sourceService = new SourceService(
+      config.source.baseUrl,
+      config.source.token
     );
   }
 
   async generateAndUpdateDescription(sku) {
     logger.info('Starting description generation', { sku });
 
-    // Step 1: Fetch product from target Magento
-    const product = await this.targetService.getProductBySku(sku);
+    // Step 1: Fetch product from source Magento
+    const product = await this.sourceService.getProductBySku(sku);
     if (!product) {
       throw new DescriptionGenerationError(
         `Product with SKU '${sku}' not found`,
@@ -65,7 +65,7 @@ class DescriptionService {
     logger.info('Product found', { sku, title });
 
     // Step 2: Get configurable children and extract flavors
-    const children = await this.targetService.getConfigurableChildren(sku);
+    const children = await this.sourceService.getConfigurableChildren(sku);
     const flavors = this.extractFlavors(children);
     logger.info('Flavors extracted', { sku, count: flavors.length });
 
@@ -130,7 +130,7 @@ class DescriptionService {
     };
 
     try {
-      await this.targetService.client.put(
+      await this.sourceService.client.put(
         `/rest/all/V1/products/${encodeURIComponent(sku)}`,
         payload
       );
