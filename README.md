@@ -15,6 +15,7 @@ A Node.js REST API server for migrating configurable products from a source Mage
 - Health check endpoints
 - Real-time Google Chat notifications for migration and price sync status
 - **Price synchronization** - sync prices from source to target Magento stores and Shopify
+- **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
 
 ## Prerequisites
 
@@ -477,6 +478,82 @@ curl -X POST http://localhost:3000/api/v1/sync/prices \
 
 **Note:** Price sync uses scoped Magento API endpoints (`/rest/{storeCode}/V1/products`) to ensure prices are updated for each store view individually. Non-scoped updates only affect the global/default price and don't propagate to store views with existing price overrides.
 
+### Generate Product Description
+
+**POST** `/api/v1/products/generate-description`
+
+Generate an AI-powered SEO-optimized product description using OpenAI GPT-4o. Fetches the product and its variant flavors from the source Magento store, generates an HTML description with flavor details and features, and updates the product's `description` and `meta_keyword` fields.
+
+**Request Body:**
+```json
+{
+  "sku": "TEST-ABC"
+}
+```
+
+**Parameters:**
+- `sku` (required): The SKU of the configurable product to generate a description for
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "sku": "TEST-ABC",
+    "title": "Product Name 50K Puff Disposable",
+    "flavorsFound": 15,
+    "description": "<div><h2>Product Name...</h2></div><div><p>...</p><ul>...</ul></div>",
+    "keywords": "keyword1, keyword2, keyword3, ...",
+    "updatedAt": "2026-01-27T00:17:12.059Z"
+  }
+}
+```
+
+**Response (Error - 404):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PRODUCT_NOT_FOUND",
+    "message": "Product with SKU 'TEST-ABC' not found"
+  }
+}
+```
+
+**Generated Content:**
+
+The AI generates:
+1. **Description HTML** - A 5-sentence SEO-optimized product description with:
+   - Product title as H2 heading
+   - Informative, professional description paragraph
+   - Flavor list with vivid descriptions (bold flavor names)
+   - Features bullet list
+
+2. **Meta Keywords** - 15 comma-separated SEO keywords relevant to the product
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/products/generate-description \
+  -H "Content-Type: application/json" \
+  -d '{"sku": "VAPE-PRODUCT-123"}'
+```
+
+**Configuration:**
+
+Requires OpenAI API key in environment variables:
+```env
+OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
+```
+
+**Error Codes:**
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `PRODUCT_NOT_FOUND` | 404 | Product SKU doesn't exist in source Magento |
+| `AI_GENERATION_FAILED` | 502 | OpenAI API call failed after retries |
+| `AI_RATE_LIMITED` | 429 | OpenAI rate limit exceeded |
+| `UPDATE_FAILED` | 502 | Failed to update product in Magento |
+
 ## Migration Process
 
 The migration follows a 3-phase approach:
@@ -842,6 +919,10 @@ MAX_IMAGE_SIZE_MB=10
 DEFAULT_INCLUDE_IMAGES=true
 DEFAULT_CREATE_MISSING_ATTRIBUTES=true
 CONTINUE_ON_ERROR=true
+
+# OpenAI (for AI-powered descriptions)
+OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
 ```
 
 ## Google Chat Notifications
@@ -979,6 +1060,7 @@ src/
 │   ├── shopify/     # Shopify GraphQL API clients
 │   ├── migration/   # Migration services (extraction, preparation, creation)
 │   ├── sync/        # Price sync services
+│   ├── ai/          # OpenAI client for AI-powered features
 │   └── notification/ # Google Chat notification service
 └── utils/           # Utility functions and helpers
 ```
@@ -1005,6 +1087,10 @@ src/
 
 ### Sync Services
 - **PriceSyncService**: Synchronize prices from source to target platforms (Magento and Shopify)
+
+### AI Services
+- **OpenAIClient**: OpenAI API client with retry logic for generating content
+- **DescriptionService**: Generate AI-powered product descriptions using product title and flavors
 
 ### Notification Services
 - **GoogleChatService**: Send real-time notifications to Google Chat for migrations and price syncs
