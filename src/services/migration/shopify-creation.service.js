@@ -58,7 +58,8 @@ class ShopifyCreationService {
       }
 
       // Build variants with option values and file associations
-      const variants = this.buildVariantsForSet(children, translations, fileIds, skuToFileIndex);
+      const allowedOptionNames = productOptions.map(o => o.name);
+      const variants = this.buildVariantsForSet(children, translations, fileIds, skuToFileIndex, allowedOptionNames);
 
       logger.info('Built Shopify product data', {
         title: productData.title,
@@ -430,16 +431,16 @@ class ShopifyCreationService {
         }
       }
 
-      // Only include variants that have option values (limit to 3)
-      let limitedOptionValues = optionValues.slice(0, 3);
-
-      // If allowedOptionNames is provided (variant sync mode), filter to only those options
+      // If allowedOptionNames is provided, filter to only those options first
+      let limitedOptionValues = optionValues;
       if (allowedOptionNames) {
         const allowedSet = new Set(allowedOptionNames.map(n => n.toLowerCase()));
         limitedOptionValues = limitedOptionValues.filter(ov =>
           allowedSet.has(ov.optionName.toLowerCase())
         );
       }
+      // Limit to 3 options (Shopify max) after filtering
+      limitedOptionValues = limitedOptionValues.slice(0, 3);
 
       // In variant sync mode, require only the number of options that exist on the target product
       // Otherwise, use the expected option count from source
