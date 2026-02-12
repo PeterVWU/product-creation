@@ -4,7 +4,6 @@ const SourceService = require('../magento/source.service');
 const TargetService = require('../magento/target.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
 const GoogleChatService = require('../notification/google-chat.service');
-const { validateStoreCodes, normalizeStoreCodes } = require('../../utils/store-scope-helpers');
 
 class PriceSyncService {
   constructor() {
@@ -13,19 +12,6 @@ class PriceSyncService {
       config.source.token,
       config.api
     );
-
-    this.targetService = new TargetService(
-      config.target.baseUrl,
-      config.target.token,
-      config.api
-    );
-
-    this.targetConfig = {
-      baseUrl: config.target.baseUrl,
-      token: config.target.token,
-      apiConfig: config.api,
-      defaultStoreCodes: config.target.storeCodes
-    };
 
     this.shopifyStores = config.shopify.stores;
     this.googleChatService = new GoogleChatService();
@@ -273,51 +259,41 @@ class PriceSyncService {
    * @returns {Object} Results for each store
    */
   async updateMagentoPrices(priceData, options = {}) {
-    const targetStores = this.resolveMagentoTargetStores(options.targetMagentoStores);
+    const targetStores = options.targetMagentoStores || [];
     const storeResults = {};
     const errors = [];
     const warnings = [];
 
+    if (targetStores.length === 0) {
+      logger.info('No Magento target stores specified, skipping Magento price sync');
+      return { storeResults, errors, warnings };
+    }
+
     logger.info('Updating Magento prices', {
       sku: priceData.parentSku,
-      targetStores: targetStores.length > 0 ? targetStores : ['default']
+      targetStores
     });
 
-    // If no specific stores, update using default (non-scoped) endpoint
-    if (targetStores.length === 0) {
+    for (const storeName of targetStores) {
       try {
-        const result = await this.updateMagentoPricesForStore(priceData, null);
-        storeResults['default'] = result;
-      } catch (error) {
-        storeResults['default'] = {
-          success: false,
-          error: error.message
-        };
-        errors.push({
-          store: 'default',
-          message: error.message
-        });
-      }
-    } else {
-      // Update for each specified store
-      for (const storeCode of targetStores) {
-        try {
-          const result = await this.updateMagentoPricesForStore(priceData, storeCode);
-          storeResults[storeCode] = result;
-        } catch (error) {
-          storeResults[storeCode] = {
-            success: false,
-            error: error.message
-          };
-          errors.push({
-            store: storeCode,
-            message: error.message
-          });
+        const targetService = TargetService.getInstanceForStore(storeName);
 
-          if (!config.errorHandling.continueOnError) {
-            break;
-          }
+        // Discover store views on this instance
+        const storeWebsiteMapping = await targetService.getStoreWebsiteMapping();
+        const storeCodes = Object.keys(storeWebsiteMapping);
+
+        // Update prices on each store view within this instance
+        for (const storeCode of storeCodes) {
+          const scopedService = targetService.createScopedInstance(storeCode);
+          const groupId = config.priceSync.storeGroupMapping[storeName.toLowerCase()];
+          const result = await this.updateMagentoPricesForInstance(priceData, scopedService, groupId, storeName, storeCode);
+          storeResults[`${storeName}:${storeCode}`] = result;
         }
+      } catch (error) {
+        storeResults[storeName] = { success: false, error: error.message };
+        errors.push({ store: storeName, message: error.message });
+
+        if (!config.errorHandling.continueOnError) break;
       }
     }
 
@@ -325,20 +301,12 @@ class PriceSyncService {
   }
 
   /**
-   * Update prices for a single Magento store
+   * Update prices for one store view within one Magento instance
    */
-  async updateMagentoPricesForStore(priceData, storeCode) {
-    // Use scoped endpoint to update prices for specific store view
-    // Non-scoped updates only affect global/default, not store-specific overrides
-    const service = storeCode
-      ? this.targetService.createScopedInstance(storeCode)
-      : this.targetService;
-
-    // Check if this store has a mapped customer group for tier pricing
-    const groupId = storeCode ? config.priceSync.storeGroupMapping[storeCode.toLowerCase()] : null;
-
+  async updateMagentoPricesForInstance(priceData, service, groupId, instanceName, storeCode) {
     if (groupId) {
-      logger.info('Using tier pricing for store', {
+      logger.info('Using tier pricing for instance', {
+        instanceName,
         storeCode,
         customerGroupId: groupId
       });
@@ -346,39 +314,31 @@ class PriceSyncService {
 
     let variantsUpdated = 0;
 
-    // Update variant (children) prices only - parent products do not have prices
     for (const child of priceData.children) {
       try {
-        // Use tier price for mapped stores, fall back to base price
         const price = groupId
           ? this.getTierPrice(child, groupId) || child.price
           : child.price;
-
-        const usedTierPrice = groupId && price !== child.price;
 
         await service.updateProductPrice(child.sku, price);
         variantsUpdated++;
         logger.debug('Variant price updated', {
           sku: child.sku,
           price,
-          basePrice: child.price,
-          usedTierPrice,
-          storeCode: storeCode || 'default'
+          instanceName,
+          storeCode
         });
       } catch (error) {
         logger.warn('Failed to update variant price', {
           sku: child.sku,
-          storeCode: storeCode || 'default',
+          instanceName,
+          storeCode,
           error: error.message
         });
-        // Continue with other variants even if one fails
       }
     }
 
-    return {
-      success: true,
-      variantsUpdated
-    };
+    return { success: true, variantsUpdated };
   }
 
   /**
@@ -605,18 +565,13 @@ class PriceSyncService {
   }
 
   /**
-   * Resolve target Magento stores from options or config defaults
+   * Resolve target Magento stores from options
    */
   resolveMagentoTargetStores(optionStores) {
     if (optionStores && Array.isArray(optionStores) && optionStores.length > 0) {
-      const validation = validateStoreCodes(optionStores);
-      if (!validation.valid) {
-        logger.warn('Invalid Magento store codes provided', { errors: validation.errors });
-        return [];
-      }
-      return normalizeStoreCodes(optionStores);
+      return optionStores.map(s => s.toLowerCase());
     }
-    return normalizeStoreCodes(this.targetConfig.defaultStoreCodes);
+    return [];
   }
 
   /**
