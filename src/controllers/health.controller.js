@@ -20,7 +20,17 @@ const magentoHealthCheck = async (req, res, next) => {
 
     const connections = await orchestrator.testConnections();
 
-    const allConnected = connections.source.connected && connections.target.connected;
+    const allTargetsConnected = Object.values(connections.targets).every(t => t.connected);
+    const allConnected = connections.source.connected && allTargetsConnected;
+
+    const targets = {};
+    for (const [name, conn] of Object.entries(connections.targets)) {
+      targets[name] = {
+        connected: conn.connected,
+        url: conn.baseUrl,
+        error: conn.error || null
+      };
+    }
 
     res.status(allConnected ? 200 : 503).json({
       status: allConnected ? 'healthy' : 'unhealthy',
@@ -31,11 +41,7 @@ const magentoHealthCheck = async (req, res, next) => {
           url: connections.source.baseUrl,
           error: connections.source.error || null
         },
-        target: {
-          connected: connections.target.connected,
-          url: connections.target.baseUrl,
-          error: connections.target.error || null
-        }
+        targets
       }
     });
   } catch (error) {
