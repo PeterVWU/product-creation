@@ -1,5 +1,6 @@
 const MagentoClient = require('./magento.client');
 const logger = require('../../config/logger');
+const config = require('../../config');
 const { buildProductPayload } = require('../../utils/helpers');
 
 class TargetService extends MagentoClient {
@@ -314,6 +315,23 @@ class TargetService extends MagentoClient {
   clearCategoryCache() {
     this._categoryCache.clear();
     logger.debug('Category cache cleared');
+  }
+
+  /**
+   * Get a TargetService instance for a named Magento store.
+   * @param {string} storeName - The store name (e.g., 'ejuices', 'misthub')
+   * @returns {TargetService}
+   */
+  static getInstanceForStore(storeName) {
+    const storeConfig = config.magentoStores[storeName];
+    if (!storeConfig) {
+      const available = Object.keys(config.magentoStores);
+      throw new Error(
+        `Magento store '${storeName}' not configured. ` +
+        `Available stores: ${available.length ? available.join(', ') : 'none'}`
+      );
+    }
+    return new TargetService(storeConfig.url, storeConfig.token, config.api);
   }
 }
 
