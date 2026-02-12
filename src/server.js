@@ -9,7 +9,7 @@ const server = app.listen(PORT, () => {
     port: PORT,
     environment: config.server.env,
     sourceUrl: config.source.baseUrl,
-    targetUrl: config.target.baseUrl
+    magentoStores: Object.keys(config.magentoStores)
   });
 
   logger.info(`API Documentation: http://localhost:${PORT}/api`);

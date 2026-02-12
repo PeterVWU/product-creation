@@ -6,8 +6,8 @@ class GoogleChatService {
     this.enabled = config.notifications?.googleChat?.enabled || false;
     this.webhookUrl = config.notifications?.googleChat?.webhookUrl;
     this.timeout = config.notifications?.googleChat?.timeout || 5000;
-    this.adminBaseUrl = config.target.baseUrl;
-    this.adminPath = config.target?.adminPath || 'admin';
+    // Admin URL is no longer tied to a single target instance
+    // Product admin links are omitted from notifications with multi-instance setup
   }
 
   isConfigured() {
@@ -15,7 +15,8 @@ class GoogleChatService {
   }
 
   buildProductAdminUrl(productId) {
-    return `${this.adminPath}/catalog/product/edit/id/${productId}/`;
+    // No single admin URL with multi-instance setup
+    return null;
   }
 
   async sendMessage(card) {
@@ -204,7 +205,8 @@ class GoogleChatService {
   }
 
   async notifyMigrationEnd(migrationContext) {
-    const { sku, success, summary, errors, productId, targetStores, storeResults, shopifyProductUrl } = migrationContext;
+    const { sku, success, summary, errors, productId, targetStores, targetMagentoStores, storeResults, shopifyProductUrl } = migrationContext;
+    const resolvedTargetStores = targetStores || targetMagentoStores || [];
 
     const statusText = success ? 'Completed Successfully' : 'Failed';
     const sectionHeader = success ? '✅ Migration Completed' : '❌ Migration Failed';
@@ -244,21 +246,23 @@ class GoogleChatService {
       });
     }
 
-    if (targetStores && targetStores.length > 0) {
+    if (resolvedTargetStores.length > 0) {
       widgets.push({
         decoratedText: {
-          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+          text: `<b>Target Stores:</b> ${resolvedTargetStores.join(', ')}`
         }
       });
 
+      const succeeded = summary.storesSucceeded || summary.instancesSucceeded || 0;
       widgets.push({
         decoratedText: {
-          text: `<b>Stores:</b> ${summary.storesSucceeded}/${targetStores.length} succeeded`
+          text: `<b>Stores:</b> ${succeeded}/${resolvedTargetStores.length} succeeded`
         }
       });
     }
 
-    if (productId) {
+    const adminUrl = productId ? this.buildProductAdminUrl(productId) : null;
+    if (adminUrl) {
       widgets.push({
         buttonList: {
           buttons: [{
@@ -266,7 +270,7 @@ class GoogleChatService {
             type: 'OUTLINED',
             onClick: {
               openLink: {
-                url: this.buildProductAdminUrl(productId)
+                url: adminUrl
               }
             }
           }]
