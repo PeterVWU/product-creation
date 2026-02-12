@@ -10,7 +10,7 @@ A Node.js REST API server for migrating configurable products from a source Mage
 - Comprehensive error handling and logging
 - Continue-on-error pattern (doesn't stop on non-critical errors)
 - Support for batch migrations
-- **Multi-store scope support** - migrate products to multiple Magento store views in a single operation
+- **Multi-instance Magento support** - migrate products to multiple independent Magento instances in a single operation
 - **Shopify migration support** - migrate Magento products to Shopify stores using GraphQL Admin API
 - Health check endpoints
 - Real-time Google Chat notifications for migration and price sync status
@@ -46,8 +46,11 @@ cp .env.example .env
 SOURCE_MAGENTO_BASE_URL=https://staging.vapewholesaleusa.com
 SOURCE_MAGENTO_TOKEN=your_source_token
 
-TARGET_MAGENTO_BASE_URL=https://h79xmxgomfk7jkn.ejuices.com
-TARGET_MAGENTO_TOKEN=your_target_token
+MAGENTO_STORE_EJUICES_URL=https://www.ejuices.com/
+MAGENTO_STORE_EJUICES_TOKEN=your_ejuices_token
+
+MAGENTO_STORE_MISTHUB_URL=https://misthub.example.com/
+MAGENTO_STORE_MISTHUB_TOKEN=your_misthub_token
 ```
 
 ## Docker Setup
@@ -124,9 +127,8 @@ The container reads environment variables from the `.env` file. You can also ove
 Key environment variables:
 - `SOURCE_MAGENTO_BASE_URL` - Source Magento instance URL
 - `SOURCE_MAGENTO_TOKEN` - Source Magento API token
-- `TARGET_MAGENTO_BASE_URL` - Target Magento instance URL
-- `TARGET_MAGENTO_TOKEN` - Target Magento API token
-- `TARGET_STORE_CODES` - Comma-separated list of target store codes (optional)
+- `MAGENTO_STORE_<NAME>_URL` - Target Magento instance URL (one per instance, e.g., `MAGENTO_STORE_EJUICES_URL`)
+- `MAGENTO_STORE_<NAME>_TOKEN` - Target Magento instance API token (one per instance, e.g., `MAGENTO_STORE_EJUICES_TOKEN`)
 - `PORT` - Server port (default: 3000)
 - `LOG_LEVEL` - Logging level (default: info)
 
@@ -226,13 +228,20 @@ Test connections to both source and target Magento instances.
   "connections": {
     "source": {
       "connected": true,
-      "url": "https://staging.vapewholesaleusa.com",
+      "url": "https://vapewholesaleusa.com",
       "error": null
     },
-    "target": {
-      "connected": true,
-      "url": "https://h79xmxgomfk7jkn.ejuices.com",
-      "error": null
+    "targets": {
+      "ejuices": {
+        "connected": true,
+        "url": "https://www.ejuices.com",
+        "error": null
+      },
+      "misthub": {
+        "connected": true,
+        "url": "https://misthub.example.com",
+        "error": null
+      }
     }
   }
 }
@@ -252,7 +261,7 @@ Migrate a single configurable product from source to target.
     "includeImages": true,
     "createMissingAttributes": true,
     "overwriteExisting": false,
-    "targetStores": ["default", "misthub"],
+    "targetMagentoStores": ["ejuices", "misthub"],
     "productEnabled": false
   }
 }
@@ -264,7 +273,7 @@ Migrate a single configurable product from source to target.
   - `includeImages` (boolean, default: true): Whether to migrate product images
   - `createMissingAttributes` (boolean, default: true): Create missing attribute options in target
   - `overwriteExisting` (boolean, default: false): Overwrite existing products
-  - `targetStores` (array of strings): Target store codes to migrate to (e.g., `["default", "misthub"]`). If omitted, uses `TARGET_STORE_CODES` env var or default endpoint
+  - `targetMagentoStores` (array of strings): Names of target Magento instances to migrate to (e.g., `["ejuices", "misthub"]`). Required.
   - `productEnabled` (boolean, default: true): Whether to create products as enabled or disabled. Set to `false` to create products in disabled status
 
 **Response (Success - 200):**
@@ -272,9 +281,9 @@ Migrate a single configurable product from source to target.
 {
   "success": true,
   "sku": "TEST-ABC",
-  "targetStores": ["default", "misthub"],
-  "storeResults": {
-    "default": {
+  "targetMagentoStores": ["ejuices", "misthub"],
+  "instanceResults": {
+    "ejuices": {
       "success": true,
       "productId": 12345,
       "childrenCreated": 6,
@@ -311,8 +320,8 @@ Migrate a single configurable product from source to target.
     "childrenMigrated": 6,
     "errorsCount": 0,
     "warningsCount": 1,
-    "storesSucceeded": 2,
-    "storesFailed": 0
+    "instancesSucceeded": 2,
+    "instancesFailed": 0
   },
   "warnings": [
     "Attribute 'custom_field' not found in target, skipped"
@@ -366,7 +375,7 @@ Migrate multiple configurable products sequentially.
   "options": {
     "includeImages": true,
     "createMissingAttributes": true,
-    "targetStores": ["default", "misthub"]
+    "targetMagentoStores": ["ejuices", "misthub"]
   }
 }
 ```
@@ -402,7 +411,7 @@ Synchronize prices from source Magento to target Magento stores and/or Shopify s
 {
   "sku": "TEST-ABC",
   "options": {
-    "targetMagentoStores": ["default", "misthub"],
+    "targetMagentoStores": ["ejuices", "misthub"],
     "targetShopifyStores": ["store1"],
     "includeMagento": true,
     "includeShopify": true
@@ -413,7 +422,7 @@ Synchronize prices from source Magento to target Magento stores and/or Shopify s
 **Parameters:**
 - `sku` (required): The SKU of the configurable product whose prices to sync
 - `options` (optional):
-  - `targetMagentoStores` (array of strings): Target Magento store codes. If omitted, uses `TARGET_STORE_CODES` env var
+  - `targetMagentoStores` (array of strings): Names of target Magento instances (e.g., `["ejuices", "misthub"]`). If omitted, syncs to all configured Magento instances
   - `targetShopifyStores` (array of strings): Target Shopify store names from `SHOPIFY_STORES` config. If omitted, syncs to all configured Shopify stores
   - `includeMagento` (boolean, default: true): Whether to sync prices to Magento
   - `includeShopify` (boolean, default: true): Whether to sync prices to Shopify
@@ -464,13 +473,13 @@ curl -X POST http://localhost:3000/api/v1/sync/prices \
   -H "Content-Type: application/json" \
   -d '{"sku": "TEST-ABC"}'
 
-# Sync to specific stores, Magento only
+# Sync to specific instances, Magento only
 curl -X POST http://localhost:3000/api/v1/sync/prices \
   -H "Content-Type: application/json" \
   -d '{
     "sku": "TEST-ABC",
     "options": {
-      "targetMagentoStores": ["default", "misthub", "ejuices"],
+      "targetMagentoStores": ["ejuices", "misthub"],
       "includeShopify": false
     }
   }'
@@ -625,7 +634,8 @@ curl -X POST http://localhost:3000/api/v1/migrate/product \
     "sku": "TEST-ABC",
     "options": {
       "includeImages": true,
-      "productEnabled": false
+      "productEnabled": false,
+      "targetMagentoStores": ["ejuices"]
     }
   }'
 ```
@@ -658,15 +668,12 @@ Magento configurable products are transformed to Shopify products:
 **Environment Variables:**
 
 ```env
-# Default Shopify store (optional)
-SHOPIFY_STORE_URL=mystore.myshopify.com
-SHOPIFY_ACCESS_TOKEN=shpat_xxxxx
-
-# Multiple stores via JSON (optional)
-SHOPIFY_STORES={"store1": {"url": "store1.myshopify.com", "token": "shpat_xxx"}, "store2": {"url": "store2.myshopify.com", "token": "shpat_yyy"}}
-
-# API version (optional, defaults to 2025-01)
 SHOPIFY_API_VERSION=2025-01
+SHOPIFY_DEFAULT_STORE=test
+
+# Pattern: SHOPIFY_STORE_<NAME>_URL and SHOPIFY_STORE_<NAME>_TOKEN
+SHOPIFY_STORE_TEST_URL=vwu-test-store.myshopify.com
+SHOPIFY_STORE_TEST_TOKEN=shpat_xxxxx
 ```
 
 ### Shopify Health Check
@@ -799,57 +806,47 @@ curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
   }'
 ```
 
-## Multi-Store Migration
+## Multi-Instance Magento Migration
 
-The API supports migrating products to multiple Magento store views in a single operation. This is useful when you need to create store-specific product data.
+The API supports migrating products to multiple independent Magento instances in a single operation. Each Magento instance is configured with its own URL and API token, allowing you to manage separate Magento installations (e.g., ejuices.com, misthub.com) from a single migration service.
 
 ### How It Works
 
-Magento supports store-scoped API calls using the format `/rest/{storeCode}/V1/products`. When you specify target stores, the API:
+Each target Magento instance is registered via environment variables using the pattern `MAGENTO_STORE_<NAME>_URL` and `MAGENTO_STORE_<NAME>_TOKEN`. When you specify target instances in a migration request, the API:
 
 1. Extracts product data from the source (once)
-2. Prepares attribute mappings (once)
-3. Creates products in each target store sequentially
-4. Uploads images only once (images are shared across stores in Magento)
+2. For each target instance:
+   - Prepares attribute mappings for that instance
+   - Auto-discovers all store views within the instance
+   - Creates products on all store views within the instance
+   - Uploads images (once per instance, as they are shared across store views)
 
-### Store Code Configuration
+### Instance Configuration
 
-**Option 1: Per-request (recommended for flexibility)**
+**Environment variables (one pair per Magento instance):**
+```env
+MAGENTO_STORE_EJUICES_URL=https://www.ejuices.com/
+MAGENTO_STORE_EJUICES_TOKEN=your_ejuices_token
+
+MAGENTO_STORE_MISTHUB_URL=https://misthub.example.com/
+MAGENTO_STORE_MISTHUB_TOKEN=your_misthub_token
+```
+
+The `<NAME>` portion (e.g., `EJUICES`, `MISTHUB`) becomes the instance identifier used in API requests (lowercased: `ejuices`, `misthub`).
+
+**Per-request targeting:**
 ```json
 {
   "sku": "TEST-ABC",
   "options": {
-    "targetStores": ["default", "misthub", "ejuices"]
+    "targetMagentoStores": ["ejuices", "misthub"]
   }
 }
 ```
 
-**Option 2: Environment variable (for consistent defaults)**
-```env
-TARGET_STORE_CODES=default,misthub,ejuices
-```
+The `targetMagentoStores` array specifies which configured Magento instances to migrate to.
 
-If both are provided, the per-request `targetStores` takes precedence.
-
-### Finding Available Store Codes
-
-Query your target Magento instance to get available store codes:
-```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  https://your-magento.com/rest/V1/store/storeViews
-```
-
-Response will include store codes like:
-```json
-[
-  {"id": 1, "code": "default", "name": "Default Store View"},
-  {"id": 8, "code": "misthub", "name": "Misthub"}
-]
-```
-
-Use the `code` field value (e.g., `default`, `misthub`) in your `targetStores` array.
-
-### Example: Multi-Store Migration
+### Example: Multi-Instance Migration
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/migrate/product \
@@ -858,7 +855,7 @@ curl -X POST http://localhost:3000/api/v1/migrate/product \
     "sku": "TEST-ABC",
     "options": {
       "includeImages": true,
-      "targetStores": ["default", "misthub"]
+      "targetMagentoStores": ["ejuices", "misthub"]
     }
   }'
 ```
@@ -868,23 +865,23 @@ curl -X POST http://localhost:3000/api/v1/migrate/product \
 {
   "success": true,
   "sku": "TEST-ABC",
-  "targetStores": ["default", "misthub"],
-  "storeResults": {
-    "default": {"success": true, "productId": 12345, "childrenCreated": 4, "imagesUploaded": 5},
-    "misthub": {"success": true, "productId": 12345, "childrenCreated": 4, "imagesUploaded": 0}
+  "targetMagentoStores": ["ejuices", "misthub"],
+  "instanceResults": {
+    "ejuices": {"success": true, "productId": 12345, "childrenCreated": 4, "imagesUploaded": 5},
+    "misthub": {"success": true, "productId": 12346, "childrenCreated": 4, "imagesUploaded": 5}
   },
   "summary": {
-    "storesSucceeded": 2,
-    "storesFailed": 0
+    "instancesSucceeded": 2,
+    "instancesFailed": 0
   }
 }
 ```
 
 ### Notes
 
-- **Backward compatible**: If no `targetStores` and no `TARGET_STORE_CODES` env var, the API uses the default Magento endpoint (`/rest/V1/products`)
-- **Images**: Uploaded only once per product (to the first store), as they're shared across stores in Magento
-- **Error handling**: Per-store failures are tracked individually; migration continues to remaining stores if `CONTINUE_ON_ERROR=true`
+- **Store views within each instance**: The API auto-discovers store views for each Magento instance and creates the product across all of them. You do not need to specify individual store view codes.
+- **Images**: Uploaded once per instance, as images are shared across store views within a single Magento installation.
+- **Error handling**: Per-instance failures are tracked individually; migration continues to remaining instances if `CONTINUE_ON_ERROR=true`.
 
 ## Logging
 
@@ -910,10 +907,11 @@ LOG_LEVEL=debug
 SOURCE_MAGENTO_BASE_URL=https://source.magento.com
 SOURCE_MAGENTO_TOKEN=your_token
 
-# Target Magento
-TARGET_MAGENTO_BASE_URL=https://target.magento.com
-TARGET_MAGENTO_TOKEN=your_token
-TARGET_STORE_CODES=default,misthub,ejuices  # Optional: comma-separated list of target store codes
+# Target Magento Stores (add as many as needed)
+MAGENTO_STORE_EJUICES_URL=https://www.ejuices.com/
+MAGENTO_STORE_EJUICES_TOKEN=your_token
+MAGENTO_STORE_MISTHUB_URL=https://misthub.example.com/
+MAGENTO_STORE_MISTHUB_TOKEN=your_token
 
 # API Settings
 API_TIMEOUT=30000
@@ -978,9 +976,6 @@ Add to your `.env` file:
 GOOGLE_CHAT_ENABLED=true
 GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
 GOOGLE_CHAT_TIMEOUT=5000
-
-# Admin path for product links (found in your Magento admin URL)
-TARGET_MAGENTO_ADMIN_PATH=admin
 ```
 
 ### Configuration Options
@@ -990,13 +985,6 @@ TARGET_MAGENTO_ADMIN_PATH=admin
 | `GOOGLE_CHAT_ENABLED` | Enable/disable notifications | `false` |
 | `GOOGLE_CHAT_WEBHOOK_URL` | Webhook URL from Google Chat | (required if enabled) |
 | `GOOGLE_CHAT_TIMEOUT` | Request timeout in milliseconds | `5000` |
-| `TARGET_MAGENTO_ADMIN_PATH` | Magento admin URL path (e.g., `admin` or `admin_xyz123`) | `admin` |
-
-### Finding Your Admin Path
-
-Your Magento admin path is the segment after your domain in the admin URL:
-- If your admin URL is `https://example.com/admin/...` → admin path is `admin`
-- If your admin URL is `https://example.com/admin_SqwOPu4tsRle/...` → admin path is `admin_SqwOPu4tsRle`
 
 ## Error Handling
 
@@ -1056,8 +1044,7 @@ If notifications aren't appearing:
 5. Verify network connectivity to `chat.googleapis.com`
 
 If the product link is incorrect:
-1. Verify `TARGET_MAGENTO_ADMIN_PATH` matches your Magento admin URL path
-2. Check that the migration completed successfully (product ID is only available on success)
+1. Check that the migration completed successfully (product ID is only available on success)
 
 ## Architecture
 
