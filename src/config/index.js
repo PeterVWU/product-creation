@@ -32,6 +32,38 @@ function parseShopifyStores() {
   return stores;
 }
 
+/**
+ * Parse Magento target store configurations from environment variables.
+ * Supports prefix-based naming: MAGENTO_STORE_<NAME>_URL and MAGENTO_STORE_<NAME>_TOKEN
+ *
+ * Example:
+ *   MAGENTO_STORE_EJUICES_URL=https://www.ejuices.com/
+ *   MAGENTO_STORE_EJUICES_TOKEN=admin_token_here
+ *
+ * Results in: { ejuices: { url: '...', token: '...' } }
+ */
+function parseMagentoStores() {
+  const stores = {};
+  const storePattern = /^MAGENTO_STORE_([A-Z0-9_]+)_URL$/;
+
+  for (const [key, value] of Object.entries(process.env)) {
+    const match = key.match(storePattern);
+    if (match) {
+      const storeName = match[1].toLowerCase();
+      const tokenKey = `MAGENTO_STORE_${match[1]}_TOKEN`;
+
+      if (process.env[tokenKey]) {
+        stores[storeName] = {
+          url: value,
+          token: process.env[tokenKey]
+        };
+      }
+    }
+  }
+
+  return stores;
+}
+
 const config = {
   server: {
     port: parseInt(process.env.PORT, 10) || 3000,
@@ -43,12 +75,7 @@ const config = {
     token: process.env.SOURCE_MAGENTO_TOKEN
   },
 
-  target: {
-    baseUrl: process.env.TARGET_MAGENTO_BASE_URL,
-    token: process.env.TARGET_MAGENTO_TOKEN,
-    adminPath: process.env.TARGET_MAGENTO_ADMIN_PATH || 'admin',
-    storeCodes: process.env.TARGET_STORE_CODES?.split(',').map(s => s.trim()).filter(Boolean) || []
-  },
+  magentoStores: parseMagentoStores(),
 
   api: {
     timeout: parseInt(process.env.API_TIMEOUT, 10) || 30000,
@@ -129,9 +156,7 @@ function parseStoreGroupMapping() {
 const validateConfig = () => {
   const required = {
     'SOURCE_MAGENTO_BASE_URL': config.source.baseUrl,
-    'SOURCE_MAGENTO_TOKEN': config.source.token,
-    'TARGET_MAGENTO_BASE_URL': config.target.baseUrl,
-    'TARGET_MAGENTO_TOKEN': config.target.token
+    'SOURCE_MAGENTO_TOKEN': config.source.token
   };
 
   const missing = Object.entries(required)
