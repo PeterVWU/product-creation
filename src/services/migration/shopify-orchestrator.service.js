@@ -81,7 +81,8 @@ class ShopifyOrchestratorService {
       includeImages: options.includeImages !== undefined
         ? options.includeImages
         : config.migration.includeImages,
-      productStatus: options.productStatus || 'DRAFT'
+      productStatus: options.productStatus || 'DRAFT',
+      shopifyStore: options.shopifyStore
     };
 
     try {
