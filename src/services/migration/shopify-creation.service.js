@@ -319,6 +319,7 @@ class ShopifyCreationService {
       if (productType) {
         logger.debug('Using category mapping for productType', {
           sourceCategories: sourceCategoryNames,
+          storeName: this.storeName,
           productType
         });
       }
