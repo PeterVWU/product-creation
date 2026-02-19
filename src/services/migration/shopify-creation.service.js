@@ -3,10 +3,11 @@ const config = require('../../config');
 const { CreationError } = require('../../utils/error-handler');
 
 class ShopifyCreationService {
-  constructor(sourceService, shopifyTargetService, categoryMappingService = null) {
+  constructor(sourceService, shopifyTargetService, categoryMappingService = null, storeName = null) {
     this.sourceService = sourceService;
     this.shopifyTargetService = shopifyTargetService;
     this.categoryMappingService = categoryMappingService;
+    this.storeName = storeName;
   }
 
   async createProducts(extractedData, options = {}) {
@@ -314,7 +315,7 @@ class ShopifyCreationService {
     // Determine productType: first try category mapping, then fall back to product_type attribute
     let productType = null;
     if (this.categoryMappingService && sourceCategoryNames.length > 0) {
-      productType = this.categoryMappingService.getShopifyProductType(sourceCategoryNames);
+      productType = this.categoryMappingService.getShopifyProductType(sourceCategoryNames, this.storeName);
       if (productType) {
         logger.debug('Using category mapping for productType', {
           sourceCategories: sourceCategoryNames,

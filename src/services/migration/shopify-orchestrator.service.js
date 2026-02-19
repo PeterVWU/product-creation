@@ -93,7 +93,7 @@ class ShopifyOrchestratorService {
 
       // Phase 2: Create in Shopify (no preparation phase needed)
       const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
-      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService);
+      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
 
       // Auto-detect if product already exists on Shopify by searching for child variant SKUs
       const hasChildren = extractedData.children && extractedData.children.length > 0;
@@ -279,7 +279,7 @@ class ShopifyOrchestratorService {
     try {
       logger.info('Executing Shopify creation phase', { options });
 
-      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService);
+      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
       const creationResult = await creationService.createProducts(extractedData, options);
 
       context.phases.creation.success = creationResult.success;
