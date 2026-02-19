@@ -8,6 +8,7 @@ class CategoryMappingService {
     this.mappings = [];
     this.sourceToShopify = new Map();
     this.sourceToTargetMagento = new Map();
+    this.sourceToShopifyByStore = new Map(); // Map<storeName, Map<sourceKey, shopifyType>>
     this.loaded = false;
   }
 
@@ -39,6 +40,17 @@ class CategoryMappingService {
         if (mapping.targetMagento) {
           this.sourceToTargetMagento.set(sourceKey, mapping.targetMagento);
         }
+
+        // Build per-store Shopify mappings
+        if (mapping.shopifyStores) {
+          for (const [storeName, storeType] of Object.entries(mapping.shopifyStores)) {
+            const storeKey = storeName.toLowerCase();
+            if (!this.sourceToShopifyByStore.has(storeKey)) {
+              this.sourceToShopifyByStore.set(storeKey, new Map());
+            }
+            this.sourceToShopifyByStore.get(storeKey).set(sourceKey, storeType);
+          }
+        }
       }
 
       this.loaded = true;
@@ -46,7 +58,8 @@ class CategoryMappingService {
       logger.info('Category mappings loaded', {
         mappingCount: this.mappings.length,
         shopifyMappings: this.sourceToShopify.size,
-        magentoMappings: this.sourceToTargetMagento.size
+        magentoMappings: this.sourceToTargetMagento.size,
+        storeSpecificMappings: this.sourceToShopifyByStore.size
       });
     } catch (error) {
       logger.error('Failed to load category mappings', {
@@ -61,17 +74,34 @@ class CategoryMappingService {
    * Get the Shopify productType for the given source category names.
    * Returns the first matching Shopify type, or null if no match found.
    * @param {string[]} sourceCategoryNames - Array of source category names
+   * @param {string|null} storeName - Optional store name for store-specific mappings
    * @returns {string|null} - The Shopify product type or null
    */
-  getShopifyProductType(sourceCategoryNames) {
+  getShopifyProductType(sourceCategoryNames, storeName = null) {
     this.loadMappings();
 
     if (!sourceCategoryNames || sourceCategoryNames.length === 0) {
       return null;
     }
 
+    // Check store-specific map first if storeName is provided
+    const storeMap = storeName ? this.sourceToShopifyByStore.get(storeName.toLowerCase()) : null;
+
     for (const categoryName of sourceCategoryNames) {
       const key = categoryName.toLowerCase();
+
+      // Try store-specific mapping first
+      if (storeMap && storeMap.has(key)) {
+        const shopifyType = storeMap.get(key);
+        logger.debug('Found store-specific Shopify product type mapping', {
+          sourceCategory: categoryName,
+          storeName,
+          shopifyType
+        });
+        return shopifyType;
+      }
+
+      // Fall back to default mapping
       if (this.sourceToShopify.has(key)) {
         const shopifyType = this.sourceToShopify.get(key);
         logger.debug('Found Shopify product type mapping', {
@@ -82,7 +112,7 @@ class CategoryMappingService {
       }
     }
 
-    logger.debug('No Shopify product type mapping found', { sourceCategoryNames });
+    logger.debug('No Shopify product type mapping found', { sourceCategoryNames, storeName });
     return null;
   }
 
