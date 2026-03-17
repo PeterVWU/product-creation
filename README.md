@@ -1,10 +1,11 @@
 # Magento Product Migration API
 
-A Node.js REST API server for migrating configurable products from a source Magento instance to target platforms (Magento or Shopify).
+A Node.js REST API server for migrating products from a source Magento instance to target platforms (Magento or Shopify).
 
 ## Features
 
 - Migrate configurable products with all their simple product children
+- **Standalone simple product migration** - migrate standalone simple products (non-configurable, catalog-visible) to Magento and Shopify
 - Automatic attribute and attribute value mapping
 - Image migration with optimization
 - Comprehensive error handling and logging
@@ -251,7 +252,10 @@ Test connections to both source and target Magento instances.
 
 **POST** `/api/v1/migrate/product`
 
-Migrate a single configurable product from source to target.
+Migrate a single product from source Magento to one or more target Magento instances. Automatically detects the product type:
+
+- **Configurable product** (`type_id=configurable`): migrates parent + all child simple products, configurable options, and option links
+- **Standalone simple product** (`type_id=simple`, `visibility > 1`): migrates the product as a single standalone product across all store views; no children
 
 **Request Body:**
 ```json
@@ -268,7 +272,7 @@ Migrate a single configurable product from source to target.
 ```
 
 **Parameters:**
-- `sku` (required): The SKU of the configurable product to migrate
+- `sku` (required): The SKU of the product to migrate
 - `options` (optional):
   - `includeImages` (boolean, default: true): Whether to migrate product images
   - `createMissingAttributes` (boolean, default: true): Create missing attribute options in target
@@ -712,7 +716,10 @@ curl http://localhost:3000/api/v1/health/shopify?store=store1
 
 **POST** `/api/v1/migrate/product/shopify`
 
-Migrate a Magento configurable product to Shopify.
+Migrate a Magento product to Shopify. Automatically detects product type:
+
+- **Configurable product**: migrated as a Shopify product with multiple variants and product options
+- **Standalone simple product**: migrated as a single-variant Shopify product with no explicit options (Shopify default "Title / Default Title")
 
 **Request Body:**
 ```json
@@ -727,7 +734,7 @@ Migrate a Magento configurable product to Shopify.
 ```
 
 **Parameters:**
-- `sku` (required): The SKU of the Magento configurable product to migrate
+- `sku` (required): The SKU of the Magento product to migrate
 - `options` (optional):
   - `includeImages` (boolean, default: from config): Whether to migrate product images
   - `shopifyStore` (string): Name of the target Shopify store from `SHOPIFY_STORES` config
@@ -805,6 +812,83 @@ curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
     }
   }'
 ```
+
+## Standalone Simple Product Migration
+
+The API automatically detects and handles standalone simple products — Magento products with `type_id=simple` and `visibility > 1` (visible in catalog/search, not a configurable child).
+
+### How It Works
+
+1. **Type probe**: before starting migration, the orchestrator fetches the source product once and classifies it as `configurable` or `standalone-simple`
+2. **Standalone extraction**: extracts the product data, images, categories, and attribute translations — no children
+3. **Creation (Magento)**: creates the product globally via `/rest/all/V1/products`, then updates store-scoped attributes for each additional store view
+4. **Creation (Shopify)**: creates a single-variant product using Shopify's `productSet` mutation with a default "Title / Default Title" option
+
+### Example: Magento
+
+```bash
+curl -X POST http://localhost:3000/api/v1/migrate/product \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "STANDALONE-SKU-123",
+    "options": {
+      "includeImages": true,
+      "targetMagentoStores": ["ejuices"]
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "sku": "STANDALONE-SKU-123",
+  "targetMagentoStores": ["ejuices"],
+  "instanceResults": {
+    "ejuices": {
+      "success": true,
+      "mode": "standalone-creation",
+      "productId": 72989,
+      "childrenCreated": 0,
+      "storeResults": {
+        "default": { "success": true, "productId": 72989, "imagesUploaded": 1, "mode": "standalone-creation" },
+        "admin":   { "success": false, "error": "Specified request cannot be processed.", "mode": "store-update" },
+        "store2":  { "success": true, "productId": 72989, "mode": "store-update" }
+      }
+    }
+  }
+}
+```
+
+> **Note:** The `admin` store view always returns a 400 from Magento when updating via the scoped REST endpoint — this is expected Magento behavior and does not affect the product.
+
+### Example: Shopify
+
+```bash
+curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "STANDALONE-SKU-123",
+    "options": {
+      "includeImages": true,
+      "shopifyStore": "mystore"
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "sku": "STANDALONE-SKU-123",
+  "targetPlatform": "shopify",
+  "shopifyStore": "mystore",
+  "shopifyProductId": "gid://shopify/Product/8503655497863",
+  "shopifyProductUrl": "https://mystore.myshopify.com/admin/products/8503655497863"
+}
+```
+
+---
 
 ## Multi-Instance Magento Migration
 
@@ -1076,12 +1160,14 @@ src/
 - **ShopifyTargetService**: Product/variant/image operations for Shopify
 
 ### Migration Services
-- **ExtractionService**: Phase 1 - Extract data from source Magento
+- **ExtractionService**: Phase 1 - Extract configurable product data from source Magento
+- **StandaloneExtractionService**: Phase 1 - Extract standalone simple product data from source Magento
 - **PreparationService**: Phase 2 - Prepare Magento target with attribute mappings
-- **CreationService**: Phase 3 - Create products in Magento target
-- **ShopifyCreationService**: Transform Magento data and create products in Shopify
-- **OrchestratorService**: Coordinates Magento→Magento migration phases
-- **ShopifyOrchestratorService**: Coordinates Magento→Shopify migration phases
+- **CreationService**: Phase 3 - Create configurable products in Magento target
+- **StandaloneMagentoCreationService**: Phase 3 - Create standalone simple products in Magento target across all store views
+- **ShopifyCreationService**: Transform Magento data and create configurable or standalone products in Shopify
+- **OrchestratorService**: Coordinates Magento→Magento migration; auto-detects configurable vs standalone
+- **ShopifyOrchestratorService**: Coordinates Magento→Shopify migration; auto-detects configurable vs standalone
 - **ImageService**: Download and upload images
 
 ### Sync Services
