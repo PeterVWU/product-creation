@@ -7,6 +7,9 @@ const PreparationService = require('./preparation.service');
 const CreationService = require('./creation.service');
 const CategoryMappingService = require('../category-mapping.service');
 const GoogleChatService = require('../notification/google-chat.service');
+const StandaloneExtractionService = require('./standalone-extraction.service');
+const StandaloneMagentoCreationService = require('./standalone-magento-creation.service');
+const { ExtractionError } = require('../../utils/error-handler');
 
 class OrchestratorService {
   constructor() {
@@ -18,6 +21,7 @@ class OrchestratorService {
 
     this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
+    this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
     this.googleChatService = new GoogleChatService();
   }
 
@@ -77,50 +81,87 @@ class OrchestratorService {
     };
 
     try {
-      // Extract from source once (shared across all instances)
-      const extractedData = await this.executeExtractionPhase(sku, migrationContext);
+      // TYPE PROBE — must happen before any extraction call
+      // ExtractionService throws for non-configurable products
+      const sourceProduct = await this.sourceService.getProductBySku(sku);
+      const productType = this.classifyProductType(sourceProduct);
 
-      const childSkus = extractedData.children.map(child => child.sku);
-      await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
+      if (productType === 'configurable') {
+        // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
+        const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
-      // Loop over each Magento instance
-      for (const storeName of targetMagentoStores) {
-        try {
-          const instanceResult = await this.migrateToInstance(
-            storeName,
-            extractedData,
-            migrationOptions,
-            migrationContext
-          );
+        const childSkus = extractedData.children.map(child => child.sku);
+        await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
-          migrationContext.instanceResults[storeName] = instanceResult;
-        } catch (error) {
-          logger.error('Migration to instance failed', {
-            sku,
-            storeName,
-            error: error.message
-          });
+        for (const storeName of targetMagentoStores) {
+          try {
+            const instanceResult = await this.migrateToInstance(
+              storeName,
+              extractedData,
+              migrationOptions,
+              migrationContext
+            );
+            migrationContext.instanceResults[storeName] = instanceResult;
+          } catch (error) {
+            logger.error('Migration to instance failed', { sku, storeName, error: error.message });
+            migrationContext.instanceResults[storeName] = {
+              success: false,
+              error: error.message,
+              storeResults: {}
+            };
+            migrationContext.errors.push({
+              phase: 'instance-migration',
+              storeName,
+              message: error.message,
+              details: error.stack
+            });
+            if (!config.errorHandling.continueOnError) throw error;
+          }
+        }
+      } else {
+        // ---- STANDALONE SIMPLE PATH ----
+        const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
 
-          migrationContext.instanceResults[storeName] = {
-            success: false,
-            error: error.message,
-            storeResults: {}
-          };
+        const childSkus = extractedData.children.map(c => c.sku); // always []
+        await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
-          migrationContext.errors.push({
-            phase: 'instance-migration',
-            storeName,
-            message: error.message,
-            details: error.stack
-          });
+        for (const storeName of targetMagentoStores) {
+          try {
+            const instanceResult = await this.migrateStandaloneToInstance(
+              sku,
+              extractedData,
+              storeName,
+              migrationOptions
+            );
+            migrationContext.instanceResults[storeName] = instanceResult;
 
-          if (!config.errorHandling.continueOnError) {
-            throw error;
+            if (!instanceResult.success) {
+              migrationContext.errors.push({
+                phase: 'instance-migration',
+                storeName,
+                message: instanceResult.error || 'Standalone migration failed'
+              });
+              if (!config.errorHandling.continueOnError) break;
+            }
+          } catch (error) {
+            logger.error('Standalone migration to instance failed', { sku, storeName, error: error.message });
+            migrationContext.instanceResults[storeName] = {
+              success: false,
+              error: error.message,
+              storeResults: {}
+            };
+            migrationContext.errors.push({
+              phase: 'instance-migration',
+              storeName,
+              message: error.message,
+              details: error.stack
+            });
+            if (!config.errorHandling.continueOnError) throw error;
           }
         }
       }
 
-      // Compute summary across all instances
+      // Compute summary (shared between configurable and standalone)
       const instanceNames = Object.keys(migrationContext.instanceResults);
       const succeeded = instanceNames.filter(n => migrationContext.instanceResults[n].success);
       const failed = instanceNames.filter(n => !migrationContext.instanceResults[n].success);
@@ -132,12 +173,9 @@ class OrchestratorService {
       migrationContext.summary.errorsCount = migrationContext.errors.length;
       migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-      // Sum up children migrated across all instances
       let totalChildrenMigrated = 0;
       for (const result of Object.values(migrationContext.instanceResults)) {
-        if (result.childrenCreated) {
-          totalChildrenMigrated += result.childrenCreated;
-        }
+        if (result.childrenCreated) totalChildrenMigrated += result.childrenCreated;
       }
       migrationContext.summary.childrenMigrated = totalChildrenMigrated;
 
@@ -174,6 +212,32 @@ class OrchestratorService {
 
       return migrationContext;
     }
+  }
+
+  /**
+   * Determine product type from a source product object.
+   * @throws {ExtractionError} for unsupported or ambiguous types
+   * @returns {'configurable'|'standalone-simple'}
+   */
+  classifyProductType(product) {
+    if (!product || !product.type_id) {
+      throw new ExtractionError(`Product type could not be determined for SKU: ${product?.sku}`);
+    }
+
+    if (product.type_id === 'configurable') {
+      return 'configurable';
+    }
+
+    if (product.type_id === 'simple') {
+      if (product.visibility === 1) {
+        throw new ExtractionError(
+          `Product ${product.sku} is a configurable variant (visibility=1). Migrate its parent configurable instead.`
+        );
+      }
+      return 'standalone-simple';
+    }
+
+    throw new ExtractionError(`Unsupported product type: ${product.type_id} for SKU: ${product.sku}`);
   }
 
   /**
@@ -651,6 +715,94 @@ class OrchestratorService {
 
       throw error;
     }
+  }
+
+  async executeStandaloneExtractionPhase(sku, sourceProduct, context) {
+    const phaseStartTime = Date.now();
+
+    try {
+      logger.info('Executing standalone extraction phase', { sku });
+
+      const extractedData = await this.standaloneExtractionService.extractProduct(sku, sourceProduct);
+
+      context.phases.extraction.success = true;
+      context.phases.extraction.duration = Date.now() - phaseStartTime;
+      context.phases.extraction.childrenFound = 0; // always 0 for standalone
+
+      logger.info('Standalone extraction phase successful', {
+        sku,
+        duration: `${context.phases.extraction.duration}ms`
+      });
+
+      return extractedData;
+    } catch (error) {
+      context.phases.extraction.success = false;
+      context.phases.extraction.duration = Date.now() - phaseStartTime;
+
+      context.errors.push({
+        phase: 'extraction',
+        message: error.message,
+        details: error.stack
+      });
+
+      logger.error('Standalone extraction phase failed', {
+        sku,
+        error: error.message,
+        duration: `${context.phases.extraction.duration}ms`
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate a standalone simple product to a single Magento instance.
+   */
+  async migrateStandaloneToInstance(sku, extractedData, storeName, migrationOptions) {
+    logger.info('Migrating standalone product to instance', { sku, storeName });
+
+    const targetService = this.getTargetService(storeName);
+    const preparationService = new PreparationService(targetService, this.categoryMappingService);
+    const creationService = new StandaloneMagentoCreationService(this.sourceService, targetService);
+
+    // Derive website IDs — same pattern as migrateToInstance
+    const storeWebsiteMapping = await targetService.getStoreWebsiteMapping();
+    const storeViews = Object.keys(storeWebsiteMapping);
+    const websiteIds = [...new Set(Object.values(storeWebsiteMapping).filter(Boolean))];
+
+    logger.info('Discovered store views for standalone migration', { storeName, storeViews, websiteIds });
+
+    // Existence check — fail if product already exists (update not yet supported)
+    const existingProduct = await targetService.getProductBySku(sku);
+    if (existingProduct) {
+      logger.warn('Standalone product already exists on target, skipping', { sku, storeName });
+      return {
+        success: false,
+        mode: 'error',
+        error: `Product ${sku} already exists on target ${storeName}. Update not yet supported.`,
+        storeResults: {}
+      };
+    }
+
+    // Prepare target (reuse existing prepareTarget — compatible with standalone data)
+    const preparedData = await preparationService.prepareTarget(extractedData);
+
+    // Create product across all store views
+    const creationResult = await creationService.createProduct(
+      extractedData,
+      preparedData,
+      storeViews,
+      websiteIds,
+      migrationOptions
+    );
+
+    return {
+      success: Object.values(creationResult.storeResults).some(r => r.success),
+      mode: 'standalone-creation',
+      productId: creationResult.parentProductId,
+      childrenCreated: 0,
+      storeResults: creationResult.storeResults
+    };
   }
 
   async testConnections() {
