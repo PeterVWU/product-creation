@@ -38,7 +38,7 @@ class StandaloneMagentoCreationService {
 
         try {
           const productData = this._buildProductData(parent, preparedData, websiteIds, options);
-          const createdProduct = await this.targetService.createOrUpdateProduct(productData);
+          const createdProduct = await this.targetService.createProduct(productData);
           parentProductId = createdProduct.id;
 
           if (options.includeImages && extractedData.images.parent.length > 0) {
@@ -135,7 +135,7 @@ class StandaloneMagentoCreationService {
       visibility: constants.MAGENTO_API.VISIBILITY.CATALOG_SEARCH
     };
 
-    await scopedTargetService.createOrUpdateProduct(updateData);
+    await scopedTargetService.updateProduct(parent.sku, updateData);
 
     logger.info('Updated standalone product for store scope', { sku: parent.sku, storeCode });
   }

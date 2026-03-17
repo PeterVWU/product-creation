@@ -842,15 +842,15 @@ class ShopifyCreationService {
         vendor: extractedData.translations?.brandLabel || ''
       };
 
-      // Single variant — omit optionValues entirely (not []) to avoid Shopify validation error
+      // Single variant with default "Title"/"Default Title" option
       const variants = [{
         sku: parent.sku,
         price: String(parent.price),
-        inventoryItem: { tracked: true }
+        inventoryItem: { tracked: true },
+        optionValues: [{ optionName: 'Title', name: 'Default Title' }]
       }];
 
-      // No product options — Shopify will create "Title"/"Default Title" automatically
-      const productOptions = [];
+      const productOptions = [{ name: 'Title', values: [{ name: 'Default Title' }] }];
 
       logger.info('Creating standalone Shopify product', {
         sku: parent.sku,
