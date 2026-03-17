@@ -774,7 +774,7 @@ class OrchestratorService {
 
     // Existence check — fail if product already exists (update not yet supported)
     const existingProduct = await targetService.getProductBySku(sku);
-    if (existingProduct) {
+    if (existingProduct && !migrationOptions.overwriteExisting) {
       logger.warn('Standalone product already exists on target, skipping', { sku, storeName });
       return {
         success: false,

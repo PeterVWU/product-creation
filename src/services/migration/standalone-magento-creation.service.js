@@ -195,7 +195,7 @@ class StandaloneMagentoCreationService {
 
   async _uploadImages(sku, imageEntries) {
     try {
-      await this.imageService.migrateImages(sku, imageEntries, { isParent: true });
+      await this.imageService.migrateProductImages(sku, imageEntries);
       return imageEntries.length;
     } catch (error) {
       logger.warn('Failed to upload images for standalone product', {
