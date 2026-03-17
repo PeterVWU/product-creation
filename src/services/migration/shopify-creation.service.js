@@ -808,6 +808,97 @@ class ShopifyCreationService {
     // No match found, return original
     return sourceValue;
   }
+  /**
+   * Create a standalone simple product on Shopify (no product options, single default variant).
+   * @param {Object} extractedData - From StandaloneExtractionService
+   * @param {string} storeName - For store-aware category mapping
+   */
+  async createStandaloneProduct(extractedData, storeName) {
+    const { parent, images, categories } = extractedData;
+    const startTime = Date.now();
+
+    logger.info('Starting Shopify standalone product creation', { sku: parent.sku, storeName });
+
+    try {
+      const sourceCategoryNames = (categories || []).map(cat => cat.name);
+      const productType = this.categoryMappingService
+        ? this.categoryMappingService.getShopifyProductType(sourceCategoryNames, storeName)
+        : null;
+
+      // Upload images if present
+      let fileIds = [];
+      if (images && images.parent && images.parent.length > 0) {
+        const { inputs } = this.buildImageInputs(images, parent, []);
+        if (inputs.length > 0) {
+          logger.info('Uploading standalone product images', { count: inputs.length });
+          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(inputs);
+        }
+      }
+
+      // Build minimal product data (no options)
+      const productData = {
+        title: parent.name,
+        productType: productType || '',
+        vendor: extractedData.translations?.brandLabel || ''
+      };
+
+      // Single variant — omit optionValues entirely (not []) to avoid Shopify validation error
+      const variants = [{
+        sku: parent.sku,
+        price: String(parent.price),
+        inventoryItem: { tracked: true }
+      }];
+
+      // No product options — Shopify will create "Title"/"Default Title" automatically
+      const productOptions = [];
+
+      logger.info('Creating standalone Shopify product', {
+        sku: parent.sku,
+        productType,
+        imagesCount: fileIds.length
+      });
+
+      const createdProduct = await this.shopifyTargetService.createProductWithVariants(
+        productData,
+        productOptions,
+        variants,
+        fileIds
+      );
+
+      // Extract the single created variant
+      const createdVariants = createdProduct.variants?.edges?.map(edge => ({
+        id: edge.node.id,
+        sku: edge.node.inventoryItem?.sku || parent.sku,
+        title: edge.node.title,
+        success: true
+      })) || [];
+
+      await this.shopifyTargetService.publishProduct(createdProduct.id);
+
+      const result = {
+        parentProductId: createdProduct.id,
+        shopifyHandle: createdProduct.handle,
+        createdVariants,
+        imagesUploaded: fileIds.filter(f => f !== null).length,
+        success: true,
+        duration: Date.now() - startTime
+      };
+
+      logger.info('Shopify standalone product created', {
+        productId: result.parentProductId,
+        variantsCreated: result.createdVariants.length,
+        imagesUploaded: result.imagesUploaded
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Shopify standalone product creation failed', {
+        sku: parent.sku,
+        error: error.message
+      });
+      throw error;
+    }
+  }
 }
 
 module.exports = ShopifyCreationService;
