@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
     "lint": "eslint src/**/*.js"
   },
   "keywords": [
@@ -34,6 +35,7 @@
   },
   "devDependencies": {
     "eslint": "^8.55.0",
+    "jest": "^30.3.0",
     "nodemon": "^3.0.2"
   }
 }
