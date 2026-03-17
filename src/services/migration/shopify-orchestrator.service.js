@@ -6,6 +6,8 @@ const ExtractionService = require('./extraction.service');
 const ShopifyCreationService = require('./shopify-creation.service');
 const CategoryMappingService = require('../category-mapping.service');
 const GoogleChatService = require('../notification/google-chat.service');
+const StandaloneExtractionService = require('./standalone-extraction.service');
+const { ExtractionError } = require('../../utils/error-handler');
 
 class ShopifyOrchestratorService {
   constructor() {
@@ -19,6 +21,7 @@ class ShopifyOrchestratorService {
     this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
     this.googleChatService = new GoogleChatService();
+    this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
 
     // Store Shopify config for creating target services
     this.shopifyConfig = {
@@ -86,131 +89,93 @@ class ShopifyOrchestratorService {
     };
 
     try {
-      // Phase 1: Extract from Magento (reuse existing extraction service)
-      const extractedData = await this.executeExtractionPhase(sku, migrationContext);
+      // TYPE PROBE — must happen before any extraction call
+      const sourceProduct = await this.sourceService.getProductBySku(sku);
+      const productType = this.classifyProductType(sourceProduct);
 
-      const childSkus = extractedData.children.map(child => child.sku);
-      await this.googleChatService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
+      if (productType === 'configurable') {
+        // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
+        const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
-      // Phase 2: Create in Shopify (no preparation phase needed)
-      const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
-      const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
+        const childSkus = extractedData.children.map(child => child.sku);
+        await this.googleChatService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
 
-      // Auto-detect if product already exists on Shopify by searching for child variant SKUs
-      const hasChildren = extractedData.children && extractedData.children.length > 0;
-      let existingProduct = null;
+        const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
+        const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
 
-      if (hasChildren) {
-        const childSkus = extractedData.children.map(c => c.sku);
-        const existingVariants = await shopifyTargetService.getVariantsBySkus(childSkus);
+        const hasChildren = extractedData.children && extractedData.children.length > 0;
+        let existingProduct = null;
 
-        if (existingVariants.length > 0) {
-          // Found existing variants - extract product info
-          const productId = existingVariants[0].product.id;
-          existingProduct = {
-            productId,
-            variants: existingVariants.map(v => ({
-              id: v.id,
-              sku: v.sku,
-              price: v.price
-            }))
-          };
-
-          logger.info('Found existing Shopify product by variant SKUs', {
-            sku: extractedData.parent.sku,
-            productId,
-            matchedVariants: existingVariants.length
-          });
+        if (hasChildren) {
+          const childSkusForCheck = extractedData.children.map(c => c.sku);
+          const existingVariants = await shopifyTargetService.getVariantsBySkus(childSkusForCheck);
+          if (existingVariants.length > 0) {
+            const productId = existingVariants[0].product.id;
+            existingProduct = {
+              productId,
+              variants: existingVariants.map(v => ({ id: v.id, sku: v.sku, price: v.price }))
+            };
+          }
         }
-      }
 
-      if (existingProduct && hasChildren) {
-        // Product exists - check for missing variants
-        const existingSkus = existingProduct.variants.map(v => v.sku).filter(Boolean);
-        const missingChildren = extractedData.children.filter(c => !existingSkus.includes(c.sku));
+        if (existingProduct && hasChildren) {
+          const existingSkus = existingProduct.variants.map(v => v.sku).filter(Boolean);
+          const missingChildren = extractedData.children.filter(c => !existingSkus.includes(c.sku));
 
-        logger.info('Auto-detected existing Shopify product', {
-          sku,
-          productId: existingProduct.productId,
-          existingVariants: existingSkus.length,
-          sourceVariants: extractedData.children.length,
-          missingVariants: missingChildren.length
-        });
+          if (missingChildren.length === 0) {
+            migrationContext.success = true;
+            migrationContext.shopifyProductId = existingProduct.productId;
+            migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
+            migrationContext.phases.creation.success = true;
+            migrationContext.phases.creation.mode = 'no-action';
+            migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+            migrationContext.summary.message = 'All variants already exist on Shopify';
+            await this.googleChatService.notifyMigrationEnd(migrationContext);
+            return migrationContext;
+          }
 
-        if (missingChildren.length === 0) {
-          // All variants exist - return early with no-action mode
-          migrationContext.success = true;
+          const syncResult = await this.executeVariantSyncPhase(
+            extractedData, creationService, existingProduct.productId, existingSkus, migrationOptions, migrationContext
+          );
+
           migrationContext.shopifyProductId = existingProduct.productId;
           migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
-          migrationContext.phases.creation.success = true;
-          migrationContext.phases.creation.mode = 'no-action';
+          migrationContext.success = syncResult.success;
           migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
-          migrationContext.summary.message = 'All variants already exist on Shopify';
+          migrationContext.summary.variantsMigrated = syncResult.variantsCreated || 0;
+          migrationContext.summary.imagesUploaded = syncResult.imagesUploaded || 0;
+          migrationContext.summary.errorsCount = migrationContext.errors.length;
+          migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-          logger.info('All variants already exist on Shopify, skipping migration', { sku, productId: existingProduct.productId });
           await this.googleChatService.notifyMigrationEnd(migrationContext);
           return migrationContext;
         }
 
-        // Sync missing variants only
-        const syncResult = await this.executeVariantSyncPhase(
-          extractedData,
-          creationService,
-          existingProduct.productId,
-          existingSkus,
-          migrationOptions,
-          migrationContext
-        );
+        const creationResult = await this.executeCreationPhase(extractedData, shopifyTargetService, migrationOptions, migrationContext);
 
-        migrationContext.shopifyProductId = existingProduct.productId;
-        migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
-        migrationContext.success = syncResult.success;
-
+        migrationContext.shopifyProductId = creationResult.parentProductId;
+        migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
+        migrationContext.success = true;
         migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
-        migrationContext.summary.variantsMigrated = syncResult.variantsCreated || 0;
-        migrationContext.summary.imagesUploaded = syncResult.imagesUploaded || 0;
+        migrationContext.summary.variantsMigrated = creationResult.createdVariants?.length || 0;
+        migrationContext.summary.imagesUploaded = creationResult.imagesUploaded || 0;
         migrationContext.summary.errorsCount = migrationContext.errors.length;
         migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-        logger.info('Shopify variant sync completed', {
-          sku,
-          success: migrationContext.success,
-          duration: `${migrationContext.summary.totalDuration}ms`,
-          variantsMigrated: migrationContext.summary.variantsMigrated
-        });
+        await this.googleChatService.notifyMigrationEnd(migrationContext);
+        return migrationContext;
+
+      } else {
+        // ---- STANDALONE SIMPLE PATH ----
+        const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
+        await this.googleChatService.notifyMigrationStart(sku, [], [shopifyStore]);
+
+        const storeResult = await this.migrateStandaloneToStore(sku, extractedData, shopifyStore, migrationOptions, migrationContext, migrationStartTime);
 
         await this.googleChatService.notifyMigrationEnd(migrationContext);
         return migrationContext;
       }
 
-      // Product doesn't exist or has no children - perform full migration
-      const creationResult = await this.executeCreationPhase(
-        extractedData,
-        shopifyTargetService,
-        migrationOptions,
-        migrationContext
-      );
-
-      migrationContext.shopifyProductId = creationResult.parentProductId;
-      migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
-      migrationContext.success = true;
-
-      migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
-      migrationContext.summary.variantsMigrated = creationResult.createdVariants?.length || 0;
-      migrationContext.summary.imagesUploaded = creationResult.imagesUploaded || 0;
-      migrationContext.summary.errorsCount = migrationContext.errors.length;
-      migrationContext.summary.warningsCount = migrationContext.warnings.length;
-
-      logger.info('Magento to Shopify migration completed', {
-        sku,
-        shopifyProductId: migrationContext.shopifyProductId,
-        duration: `${migrationContext.summary.totalDuration}ms`,
-        variantsMigrated: migrationContext.summary.variantsMigrated
-      });
-
-      await this.googleChatService.notifyMigrationEnd(migrationContext);
-
-      return migrationContext;
     } catch (error) {
       migrationContext.success = false;
       migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
@@ -230,9 +195,34 @@ class ShopifyOrchestratorService {
       });
 
       await this.googleChatService.notifyMigrationEnd(migrationContext);
-
       return migrationContext;
     }
+  }
+
+  /**
+   * Determine product type from a source product object.
+   * @throws {ExtractionError} for unsupported or ambiguous types
+   * @returns {'configurable'|'standalone-simple'}
+   */
+  classifyProductType(product) {
+    if (!product || !product.type_id) {
+      throw new ExtractionError(`Product type could not be determined for SKU: ${product?.sku}`);
+    }
+
+    if (product.type_id === 'configurable') {
+      return 'configurable';
+    }
+
+    if (product.type_id === 'simple') {
+      if (product.visibility === 1) {
+        throw new ExtractionError(
+          `Product ${product.sku} is a configurable variant (visibility=1). Migrate its parent configurable instead.`
+        );
+      }
+      return 'standalone-simple';
+    }
+
+    throw new ExtractionError(`Unsupported product type: ${product.type_id} for SKU: ${product.sku}`);
   }
 
   async executeExtractionPhase(sku, context) {
@@ -269,6 +259,36 @@ class ShopifyOrchestratorService {
         error: error.message,
         duration: `${context.phases.extraction.duration}ms`
       });
+
+      throw error;
+    }
+  }
+
+  async executeStandaloneExtractionPhase(sku, sourceProduct, context) {
+    const phaseStartTime = Date.now();
+
+    try {
+      logger.info('Executing standalone Shopify extraction phase', { sku });
+
+      const extractedData = await this.standaloneExtractionService.extractProduct(sku, sourceProduct);
+
+      context.phases.extraction.success = true;
+      context.phases.extraction.duration = Date.now() - phaseStartTime;
+      context.phases.extraction.childrenFound = 0;
+
+      logger.info('Standalone extraction phase successful', {
+        sku,
+        duration: `${context.phases.extraction.duration}ms`
+      });
+
+      return extractedData;
+    } catch (error) {
+      context.phases.extraction.success = false;
+      context.phases.extraction.duration = Date.now() - phaseStartTime;
+
+      context.errors.push({ phase: 'extraction', message: error.message, details: error.stack });
+
+      logger.error('Standalone extraction phase failed', { sku, error: error.message });
 
       throw error;
     }
@@ -376,6 +396,75 @@ class ShopifyOrchestratorService {
         error: error.message,
         duration: `${context.phases.creation.duration}ms`
       });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate a standalone simple product to a single Shopify store.
+   */
+  async migrateStandaloneToStore(sku, extractedData, shopifyStore, migrationOptions, migrationContext, migrationStartTime) {
+    const phaseStartTime = Date.now();
+
+    const shopifyTargetService = this.getShopifyTargetService(shopifyStore);
+    const creationService = new ShopifyCreationService(
+      this.sourceService,
+      shopifyTargetService,
+      this.categoryMappingService,
+      shopifyStore
+    );
+
+    // Existence check using variant SKU lookup
+    const existingVariants = await shopifyTargetService.getVariantsBySkus([sku]);
+    if (existingVariants.length > 0) {
+      logger.warn('Standalone product already exists on Shopify, skipping', { sku, shopifyStore });
+
+      migrationContext.success = false;
+      migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+      migrationContext.summary.errorsCount = migrationContext.errors.length + 1;
+      migrationContext.summary.warningsCount = migrationContext.warnings.length;
+
+      migrationContext.errors.push({
+        phase: 'creation',
+        shopifyStore,
+        message: `Product ${sku} already exists on Shopify ${shopifyStore}. Update not yet supported.`
+      });
+
+      return { success: false };
+    }
+
+    try {
+      const creationResult = await creationService.createStandaloneProduct(extractedData, shopifyStore);
+
+      migrationContext.shopifyProductId = creationResult.parentProductId;
+      migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
+      migrationContext.success = true;
+
+      migrationContext.phases.creation.success = true;
+      migrationContext.phases.creation.duration = Date.now() - phaseStartTime;
+      migrationContext.phases.creation.variantsCreated = creationResult.createdVariants.length;
+      migrationContext.phases.creation.imagesUploaded = creationResult.imagesUploaded || 0;
+
+      migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+      migrationContext.summary.variantsMigrated = creationResult.createdVariants.length;
+      migrationContext.summary.imagesUploaded = creationResult.imagesUploaded || 0;
+      migrationContext.summary.errorsCount = migrationContext.errors.length;
+      migrationContext.summary.warningsCount = migrationContext.warnings.length;
+
+      logger.info('Standalone Shopify product migration completed', {
+        sku,
+        shopifyStore,
+        productId: migrationContext.shopifyProductId
+      });
+
+      return { success: true };
+    } catch (error) {
+      migrationContext.phases.creation.success = false;
+      migrationContext.phases.creation.duration = Date.now() - phaseStartTime;
+      migrationContext.success = false;
+      migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
+      migrationContext.errors.push({ phase: 'creation', shopifyStore, message: error.message, details: error.stack });
 
       throw error;
     }
