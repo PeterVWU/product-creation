@@ -103,4 +103,51 @@ describe('ShopifyTargetService', () => {
       expect(variables.variants[2]).toEqual({ id: 'gid://shopify/ProductVariant/3', compareAtPrice: '55' });
     });
   });
+
+  describe('deleteAllProductMedia', () => {
+    it('calls productDeleteMedia mutation with all media IDs', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: {
+          productDeleteMedia: {
+            deletedMediaIds: ['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2'],
+            mediaUserErrors: []
+          }
+        }
+      });
+
+      await service.deleteAllProductMedia(
+        'gid://shopify/Product/123',
+        ['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2']
+      );
+
+      expect(service.query).toHaveBeenCalledWith(
+        expect.stringContaining('productDeleteMedia'),
+        {
+          productId: 'gid://shopify/Product/123',
+          mediaIds: ['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2']
+        }
+      );
+    });
+
+    it('does nothing when mediaIds is empty', async () => {
+      service.query = jest.fn();
+      await service.deleteAllProductMedia('gid://shopify/Product/123', []);
+      expect(service.query).not.toHaveBeenCalled();
+    });
+
+    it('throws when mutation returns userErrors', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: {
+          productDeleteMedia: {
+            deletedMediaIds: [],
+            mediaUserErrors: [{ field: 'mediaIds', message: 'invalid id' }]
+          }
+        }
+      });
+
+      await expect(
+        service.deleteAllProductMedia('gid://shopify/Product/123', ['gid://shopify/MediaImage/1'])
+      ).rejects.toThrow('invalid id');
+    });
+  });
 });

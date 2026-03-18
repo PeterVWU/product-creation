@@ -895,6 +895,42 @@ class ShopifyTargetService extends ShopifyClient {
     return `https://${this.shopDomain}/admin/products/${numericId}`;
   }
 
+  /**
+   * Delete all media from a Shopify product by media ID list.
+   * Throws if the mutation returns userErrors.
+   * @param {string} productId - Shopify product GID
+   * @param {string[]} mediaIds - Array of media GIDs to delete
+   */
+  async deleteAllProductMedia(productId, mediaIds) {
+    if (!mediaIds || mediaIds.length === 0) return;
+
+    logger.info('Deleting all product media', { productId, count: mediaIds.length });
+
+    const mutation = `
+      mutation productDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
+        productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+          deletedMediaIds
+          mediaUserErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const result = await this.query(mutation, { productId, mediaIds });
+
+    const errors = result.data.productDeleteMedia.mediaUserErrors;
+    if (errors && errors.length > 0) {
+      throw new Error(`Media deletion failed: ${errors.map(e => e.message).join(', ')}`);
+    }
+
+    logger.info('Product media deleted', {
+      productId,
+      deletedCount: result.data.productDeleteMedia.deletedMediaIds?.length || 0
+    });
+  }
+
   async deleteProduct(productId) {
     logger.info('Deleting product from Shopify', { productId });
 
