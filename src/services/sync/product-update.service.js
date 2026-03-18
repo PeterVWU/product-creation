@@ -283,15 +283,23 @@ class ProductUpdateService {
     const metaKeyword = this.extractCustomAttribute(sourceProduct, 'meta_keyword');
     const tags = this.parseMetaKeywordsToTags(metaKeyword);
 
-    await shopifyService.updateProductFields(productId, {
+    const shopifyFields = {
       title: sourceProduct.name,
-      vendor: brandLabel,
       descriptionHtml: description || '',
       productType: shopifyProductType,
-      seoTitle: metaTitle,
-      seoDescription: metaDescription,
       tags
-    });
+    };
+    if (brandLabel !== null && brandLabel !== undefined) {
+      shopifyFields.vendor = brandLabel;
+    }
+    if (metaTitle !== null) {
+      shopifyFields.seoTitle = metaTitle;
+    }
+    if (metaDescription !== null) {
+      shopifyFields.seoDescription = metaDescription;
+    }
+
+    await shopifyService.updateProductFields(productId, shopifyFields);
 
     // 4. Image replace (best-effort — failure recorded as warning)
     try {
@@ -373,8 +381,6 @@ class ProductUpdateService {
     // Start notification (after successful extraction)
     await this.googleChatService.notifyProductUpdateStart(sku, allTargetStores);
 
-    let extractionSucceeded = true;
-
     try {
       // Magento updates
       const includeMagento = options.includeMagento !== false;
@@ -428,11 +434,9 @@ class ProductUpdateService {
 
       const duration = Date.now() - startTime;
 
-      if (extractionSucceeded) {
-        await this.googleChatService.notifyProductUpdateEnd({
-          sku, success: false, errors: result.errors, targetStores: allTargetStores, duration
-        });
-      }
+      await this.googleChatService.notifyProductUpdateEnd({
+        sku, success: false, errors: result.errors, targetStores: allTargetStores, duration
+      });
 
       return result;
     }
