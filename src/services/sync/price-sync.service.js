@@ -502,29 +502,37 @@ class PriceSyncService {
           ? (this.getTierPrice(child, groupId) || child.price)
           : child.price;
 
-        const hasCompareAt = variant.compareAtPrice !== null;
-        variantPrices.push({
-          id: variant.id,
-          price,
-          productId: variant.product.id,
-          updateCompareAt: hasCompareAt
-        });
-
-        if (groupId && price !== child.price) {
-          logger.debug('Using tier price for variant', {
-            sku: child.sku,
-            tierPrice: price,
-            basePrice: child.price,
-            customerGroupId: groupId
+        if (groupId) {
+          // Tier store — existing behaviour unchanged
+          const hasCompareAt = variant.compareAtPrice !== null;
+          variantPrices.push({
+            id: variant.id,
+            price,
+            productId: variant.product.id,
+            updateCompareAt: hasCompareAt
           });
-        }
 
-        if (hasCompareAt) {
-          logger.debug('Variant has compareAtPrice, will update compareAtPrice only', {
-            sku: child.sku,
-            currentCompareAt: variant.compareAtPrice,
-            currentPrice: variant.price,
-            newCompareAt: price
+          if (price !== child.price) {
+            logger.debug('Using tier price for variant', {
+              sku: child.sku,
+              tierPrice: price,
+              basePrice: child.price,
+              customerGroupId: groupId
+            });
+          }
+        } else {
+          // Non-tier store — drive compareAtPrice from Magento special_price
+          const hasSpecial = child.specialPrice != null && child.specialPrice < price;
+          if (child.specialPrice != null && child.specialPrice >= price) {
+            logger.warn('special_price >= regular price, ignoring special price', {
+              sku: child.sku, specialPrice: child.specialPrice, price
+            });
+          }
+          variantPrices.push({
+            id: variant.id,
+            price: hasSpecial ? child.specialPrice : price,
+            compareAtPrice: hasSpecial ? price : null,
+            productId: variant.product.id
           });
         }
       }
@@ -548,7 +556,12 @@ class PriceSyncService {
     for (const [productId, productVariants] of variantsByProduct) {
       const pricesToUpdate = variantPrices
         .filter(vp => vp.productId === productId)
-        .map(({ id, price, updateCompareAt }) => ({ id, price, updateCompareAt }));
+        .map(({ id, price, updateCompareAt, compareAtPrice }) => ({
+          id,
+          price,
+          ...(updateCompareAt !== undefined && { updateCompareAt }),
+          ...(compareAtPrice !== undefined && { compareAtPrice })
+        }));
 
       // Log what we're about to update
       logger.info('Preparing variant price update', {

@@ -198,4 +198,109 @@ describe('PriceSyncService', () => {
       expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 85.00, 60.00);
     });
   });
+
+  describe('updateShopifyPricesForStore (non-tier store)', () => {
+    const ShopifyTargetService = require('../../../src/services/shopify/shopify-target.service');
+    const config = require('../../../src/config');
+
+    let mockShopifyService;
+
+    beforeEach(() => {
+      // Non-tier store: no groupId mapping
+      config.priceSync.storeGroupMapping = {};
+
+      mockShopifyService = {
+        getVariantsBySkus: jest.fn(),
+        updateVariantPrices: jest.fn().mockResolvedValue({ updatedCount: 1 })
+      };
+
+      jest.spyOn(ShopifyTargetService.prototype, 'getVariantsBySkus')
+        .mockImplementation((...args) => mockShopifyService.getVariantsBySkus(...args));
+      jest.spyOn(ShopifyTargetService.prototype, 'updateVariantPrices')
+        .mockImplementation((...args) => mockShopifyService.updateVariantPrices(...args));
+    });
+
+    const storeConfig = { url: 'test.myshopify.com', token: 'tok' };
+    const existingVariant = {
+      id: 'gid://shopify/ProductVariant/1',
+      sku: 'CHILD-001',
+      price: '95.00',
+      compareAtPrice: null,
+      product: { id: 'gid://shopify/Product/1' }
+    };
+
+    it('sets price=specialPrice and compareAtPrice=regularPrice when child has specialPrice', async () => {
+      mockShopifyService.getVariantsBySkus.mockResolvedValue([existingVariant]);
+
+      const priceData = {
+        parentSku: 'PARENT-001',
+        children: [{ sku: 'CHILD-001', price: 99.99, specialPrice: 79.99 }]
+      };
+
+      await service.updateShopifyPricesForStore(priceData, 'teststore', storeConfig);
+
+      const variantPrices = mockShopifyService.updateVariantPrices.mock.calls[0][1];
+      expect(variantPrices[0].price).toBe(79.99);
+      expect(variantPrices[0].compareAtPrice).toBe(99.99);
+    });
+
+    it('sets price=regularPrice and compareAtPrice=null when child has no specialPrice', async () => {
+      mockShopifyService.getVariantsBySkus.mockResolvedValue([existingVariant]);
+
+      const priceData = {
+        parentSku: 'PARENT-001',
+        children: [{ sku: 'CHILD-001', price: 99.99, specialPrice: null }]
+      };
+
+      await service.updateShopifyPricesForStore(priceData, 'teststore', storeConfig);
+
+      const variantPrices = mockShopifyService.updateVariantPrices.mock.calls[0][1];
+      expect(variantPrices[0].price).toBe(99.99);
+      expect(variantPrices[0].compareAtPrice).toBeNull();
+    });
+
+    it('treats specialPrice >= regularPrice as no special price (logs warning)', async () => {
+      mockShopifyService.getVariantsBySkus.mockResolvedValue([existingVariant]);
+
+      const priceData = {
+        parentSku: 'PARENT-001',
+        children: [{ sku: 'CHILD-001', price: 79.99, specialPrice: 99.99 }]
+      };
+
+      await service.updateShopifyPricesForStore(priceData, 'teststore', storeConfig);
+
+      const variantPrices = mockShopifyService.updateVariantPrices.mock.calls[0][1];
+      // specialPrice >= price → treated as no special price
+      expect(variantPrices[0].price).toBe(79.99);
+      expect(variantPrices[0].compareAtPrice).toBeNull();
+    });
+
+    it('uses legacy updateCompareAt shape for tier-mapped stores and ignores specialPrice', async () => {
+      // Set up a tier store mapping
+      config.priceSync.storeGroupMapping = { tierstore: 2 };
+
+      const variantWithCompareAt = {
+        ...existingVariant,
+        compareAtPrice: '95.00' // has compare-at price → tier logic will use updateCompareAt
+      };
+      mockShopifyService.getVariantsBySkus.mockResolvedValue([variantWithCompareAt]);
+
+      const priceData = {
+        parentSku: 'PARENT-001',
+        children: [{
+          sku: 'CHILD-001',
+          price: 99.99,
+          specialPrice: 79.99,
+          tierPrices: [{ customer_group_id: 2, qty: 1, value: 85.00 }]
+        }]
+      };
+
+      await service.updateShopifyPricesForStore(priceData, 'tierstore', storeConfig);
+
+      const variantPrices = mockShopifyService.updateVariantPrices.mock.calls[0][1];
+      // Tier store: uses updateCompareAt flag, not compareAtPrice field
+      expect(variantPrices[0].updateCompareAt).toBe(true);
+      expect(variantPrices[0]).not.toHaveProperty('compareAtPrice');
+    });
+  });
 });
