@@ -321,6 +321,8 @@ class PriceSyncService {
           ? this.getTierPrice(child, groupId) || child.price
           : child.price;
 
+        // specialPrice is always passed regardless of groupId — tier mapping is a Shopify-only concept.
+        // Magento targets always sync both price and special_price.
         await service.updateProductPrice(child.sku, price, child.specialPrice);
         variantsUpdated++;
         logger.debug('Variant price updated', {
@@ -491,8 +493,8 @@ class PriceSyncService {
     }
 
     // Step 3: Build variant prices array by matching Magento children to Shopify variants
-    // If variant has compareAtPrice, update compareAtPrice only (preserve sale price)
-    // If no compareAtPrice, update regular price
+    // Tier stores: use updateCompareAt flag to preserve existing sale price logic (unchanged)
+    // Non-tier stores: drive price/compareAtPrice from Magento special_price
     const variantPrices = [];
     for (const child of priceData.children) {
       const variant = variants.find(v => v.sku === child.sku);

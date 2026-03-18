@@ -275,6 +275,21 @@ describe('PriceSyncService', () => {
       expect(variantPrices[0].compareAtPrice).toBeNull();
     });
 
+    it('treats missing specialPrice (undefined) as no special price', async () => {
+      mockShopifyService.getVariantsBySkus.mockResolvedValue([existingVariant]);
+
+      const priceData = {
+        parentSku: 'PARENT-001',
+        children: [{ sku: 'CHILD-001', price: 99.99 }] // no specialPrice field
+      };
+
+      await service.updateShopifyPricesForStore(priceData, 'teststore', storeConfig);
+
+      const variantPrices = mockShopifyService.updateVariantPrices.mock.calls[0][1];
+      expect(variantPrices[0].price).toBe(99.99);
+      expect(variantPrices[0].compareAtPrice).toBeNull();
+    });
+
     it('uses legacy updateCompareAt shape for tier-mapped stores and ignores specialPrice', async () => {
       // Set up a tier store mapping
       config.priceSync.storeGroupMapping = { tierstore: 2 };
