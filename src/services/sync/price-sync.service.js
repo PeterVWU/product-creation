@@ -188,6 +188,14 @@ class PriceSyncService {
           });
         }
       }
+    } else if (parent.type_id === 'simple') {
+      // Standalone simple product — the product itself is its only variant
+      priceData.children.push({
+        sku: parent.sku,
+        price: parent.price,
+        specialPrice: this.extractSpecialPrice(parent),
+        tierPrices: parent.tier_prices || []
+      });
     }
 
     // Log extracted price data for debugging

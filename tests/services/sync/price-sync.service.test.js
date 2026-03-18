@@ -139,6 +139,59 @@ describe('PriceSyncService', () => {
 
       expect(result.children[0].tierPrices).toEqual([{ customer_group_id: 2, qty: 1, value: 85.00 }]);
     });
+
+    it('standalone: children contains one entry using parent sku and price', async () => {
+      const mockParent = {
+        sku: 'SIMPLE-001',
+        type_id: 'simple',
+        price: 49.99,
+        tier_prices: [],
+        custom_attributes: []
+      };
+
+      service.sourceService.getProductBySku = jest.fn().mockResolvedValueOnce(mockParent);
+
+      const result = await service.extractPrices('SIMPLE-001');
+
+      expect(result.children).toHaveLength(1);
+      expect(result.children[0].sku).toBe('SIMPLE-001');
+      expect(result.children[0].price).toBe(49.99);
+      expect(result.children[0].specialPrice).toBeNull();
+      expect(result.children[0].tierPrices).toEqual([]);
+    });
+
+    it('standalone: specialPrice is populated from parent custom_attributes', async () => {
+      const mockParent = {
+        sku: 'SIMPLE-002',
+        type_id: 'simple',
+        price: 49.99,
+        tier_prices: [],
+        custom_attributes: [{ attribute_code: 'special_price', value: '39.99' }]
+      };
+
+      service.sourceService.getProductBySku = jest.fn().mockResolvedValueOnce(mockParent);
+
+      const result = await service.extractPrices('SIMPLE-002');
+
+      expect(result.children[0].specialPrice).toBe(39.99);
+    });
+
+    it('standalone: getProductBySku is called exactly once — no child fetches', async () => {
+      const mockParent = {
+        sku: 'SIMPLE-003',
+        type_id: 'simple',
+        price: 29.99,
+        tier_prices: [],
+        custom_attributes: []
+      };
+
+      service.sourceService.getProductBySku = jest.fn().mockResolvedValueOnce(mockParent);
+
+      await service.extractPrices('SIMPLE-003');
+
+      expect(service.sourceService.getProductBySku).toHaveBeenCalledTimes(1);
+      expect(service.sourceService.getProductBySku).toHaveBeenCalledWith('SIMPLE-003');
+    });
   });
 
   describe('updateMagentoPricesForInstance', () => {
