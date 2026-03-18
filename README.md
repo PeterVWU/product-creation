@@ -16,6 +16,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - Health check endpoints
 - Real-time Google Chat notifications for migration and price sync status
 - **Price synchronization** - sync regular and special prices from source to target Magento stores and Shopify; supports both configurable and standalone simple products
+- **Product fields update** - push content fields (name, brand, categories, images, description, SEO) from source Magento to target Magento stores and Shopify in one call; supports both configurable and standalone simple products
 - **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
 
 ## Prerequisites
@@ -514,6 +515,158 @@ PRICE_SYNC_STORE_GROUP_MAP=ejuicesco:2,wholesale:3
 ```
 
 When syncing prices to a mapped store, the service will use the tier price for that customer group (with qty=1) if available, falling back to the base price if no tier price exists. Unmapped stores always use the base price.
+
+### Sync Product Fields
+
+**POST** `/api/v1/sync/product-fields`
+
+Push a fixed set of content fields from source Magento to one or more target Magento instances and/or Shopify stores. The source of truth is always the source Magento instance. Supports both **configurable products** and **standalone simple products**.
+
+**Fields always updated (no per-field selection):**
+
+| Field | Source (Magento) | Target Magento | Target Shopify |
+|-------|-----------------|----------------|----------------|
+| Product name | `name` | `name` (per store view) | `title` |
+| Brand | `brand` custom attribute | `brand` custom attribute | `vendor` |
+| Categories | `category_ids` / `category_links` | `extension_attributes.category_links` | `productType` |
+| Images | `media_gallery_entries` | replaces all existing media | replaces all existing media |
+| Description | `description` custom attribute | `description` custom attribute (per store view) | `descriptionHtml` |
+| SEO meta title | `meta_title` | `meta_title` (per store view) | `seo.title` |
+| SEO meta keywords | `meta_keyword` | `meta_keyword` (per store view) | `tags` (split by comma) |
+| SEO meta description | `meta_description` | `meta_description` (per store view) | `seo.description` |
+
+**How it works:**
+
+1. **Extraction** — source product is fetched once from source Magento. If not found, the request fails immediately.
+2. **Magento update (per target instance):**
+   - Checks the product exists on the target; skips with `success: false` if not found
+   - Translates brand label to the target instance's option ID
+   - Maps source category names to target category IDs using the category mapping config
+   - Writes brand and categories globally via `/rest/all/V1/products/{sku}` (global-scope attributes)
+   - Deletes all existing images, then re-uploads source images
+   - Writes name, description, and SEO fields to every store view via scoped endpoints (`/rest/{storeCode}/V1/...`)
+3. **Shopify update (per store):**
+   - For configurable products: looks up the product by first child variant SKU
+   - For standalone simple products: looks up the product by the product SKU directly
+   - Skips with `success: false` if not found
+   - Updates title, vendor, productType, descriptionHtml, tags, and SEO via `productUpdate` GraphQL mutation
+   - Deletes all existing media, then uploads new images via source Magento URLs
+   - Image replace failures are non-fatal: captured as a warning, text fields remain updated
+4. **Notifications** — Google Chat notification sent after extraction (start) and after all stores complete (end)
+
+**Request Body:**
+```json
+{
+  "sku": "PARENT-SKU",
+  "options": {
+    "targetMagentoStores": ["ejuices"],
+    "targetShopifyStores": ["wholesale"],
+    "includeMagento": true,
+    "includeShopify": true
+  }
+}
+```
+
+**Parameters:**
+- `sku` (required): The SKU of the product on source Magento. For configurable products, pass the parent SKU.
+- `options` (optional):
+  - `targetMagentoStores` (array of strings): Names of target Magento instances to update. Defaults to **all configured Magento instances** when omitted.
+  - `targetShopifyStores` (array of strings): Names of target Shopify stores to update. Defaults to all configured Shopify stores when omitted.
+  - `includeMagento` (boolean, default: `true`): Whether to update Magento targets.
+  - `includeShopify` (boolean, default: `true`): Whether to update Shopify targets.
+
+> Omitting both store lists with just `{ "sku": "X" }` will push to every configured store on all platforms.
+
+**Response (Success - 200):** All stores updated successfully.
+```json
+{
+  "success": true,
+  "sku": "PARENT-SKU",
+  "results": {
+    "magento": {
+      "ejuices": { "success": true, "warnings": [] }
+    },
+    "shopify": {
+      "wholesale": { "success": true, "warnings": [] }
+    }
+  },
+  "errors": [],
+  "warnings": []
+}
+```
+
+**Response (Partial Failure - 207):** One or more stores failed or had warnings.
+```json
+{
+  "success": false,
+  "sku": "PARENT-SKU",
+  "results": {
+    "magento": {
+      "ejuices": {
+        "success": false,
+        "error": "Product not found in target store"
+      }
+    },
+    "shopify": {
+      "wholesale": {
+        "success": true,
+        "warnings": [
+          { "field": "images", "message": "Image replace failed: network timeout" }
+        ]
+      }
+    }
+  },
+  "errors": [
+    { "store": "ejuices", "message": "Product not found in target store" }
+  ],
+  "warnings": [
+    { "store": "wholesale", "field": "images", "message": "Image replace failed: network timeout" }
+  ]
+}
+```
+
+**Per-store warnings (non-fatal):**
+- Brand translation failure on Magento — brand field skipped, update continues
+- Category mapping failure on Magento — category update skipped, update continues
+- Image replace failure on Shopify — warning recorded, text fields already written, store result remains `success: true`
+- Image replace failure on Magento — warning recorded, update continues
+
+**HTTP status:**
+- `200` — `success: true` (all stores succeeded, no errors)
+- `207` — `success: false` (any per-store failure, any entry in `errors[]`, or both)
+
+**Example:**
+```bash
+# Update a specific configurable product to one Magento instance and one Shopify store
+curl -X POST http://localhost:3000/api/v1/sync/product-fields \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "Palax KC8000 Disposable",
+    "options": {
+      "targetMagentoStores": ["ejuices"],
+      "targetShopifyStores": ["wholesale"]
+    }
+  }'
+
+# Push to all configured stores on all platforms (no options needed)
+curl -X POST http://localhost:3000/api/v1/sync/product-fields \
+  -H "Content-Type: application/json" \
+  -d '{ "sku": "Palax KC8000 Disposable" }'
+
+# Magento only
+curl -X POST http://localhost:3000/api/v1/sync/product-fields \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "Palax KC8000 Disposable",
+    "options": {
+      "includeShopify": false
+    }
+  }'
+```
+
+> **Note on `admin` store view:** Magento's `admin` store view returns a 400 when updated via a scoped REST endpoint — this is expected Magento behavior and does not affect the product. It appears as a per-store warning, not a failure.
+
+---
 
 ### Generate Product Description
 
@@ -1060,6 +1213,15 @@ The API can send real-time notifications to Google Chat when migrations and pric
 - Lists variant SKUs with their new prices (up to 10 shown)
 - Includes error details if sync failed
 
+**Product Fields Update Start**
+- Sent after successful extraction from source Magento, before any store updates begin
+- Shows SKU and list of target stores
+
+**Product Fields Update Complete**
+- Sent after all stores finish (success or failure)
+- Shows SKU, overall status, duration, and any errors
+- Also sent if an unexpected error occurs mid-update
+
 ### Setup
 
 1. **Create a Google Chat Webhook**
@@ -1187,6 +1349,7 @@ src/
 
 ### Sync Services
 - **PriceSyncService**: Synchronize prices from source to target platforms (Magento and Shopify)
+- **ProductUpdateService**: Push content fields (name, brand, categories, images, description, SEO) from source to target platforms (Magento and Shopify)
 
 ### AI Services
 - **OpenAIClient**: OpenAI API client with retry logic for generating content
