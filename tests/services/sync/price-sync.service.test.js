@@ -140,4 +140,52 @@ describe('PriceSyncService', () => {
       expect(result.children[0].tierPrices).toEqual([{ customer_group_id: 2, qty: 1, value: 85.00 }]);
     });
   });
+
+  describe('updateMagentoPricesForInstance', () => {
+    // updateMagentoPricesForInstance receives a scoped TargetService instance directly.
+    // We pass a plain mock object — no need to involve the TargetService class mock.
+    let mockScopedService;
+
+    beforeEach(() => {
+      mockScopedService = {
+        updateProductPrice: jest.fn().mockResolvedValue({})
+      };
+    });
+
+    it('passes specialPrice to updateProductPrice', async () => {
+      const priceData = {
+        children: [{ sku: 'CHILD-001', price: 99.99, specialPrice: 79.99, tierPrices: [] }]
+      };
+
+      await service.updateMagentoPricesForInstance(priceData, mockScopedService, null, 'store1', 'default');
+
+      expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 99.99, 79.99);
+    });
+
+    it('passes null specialPrice to clear it on target', async () => {
+      const priceData = {
+        children: [{ sku: 'CHILD-001', price: 99.99, specialPrice: null, tierPrices: [] }]
+      };
+
+      await service.updateMagentoPricesForInstance(priceData, mockScopedService, null, 'store1', 'default');
+
+      expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 99.99, null);
+    });
+
+    it('uses tier price for price but still passes specialPrice', async () => {
+      const priceData = {
+        children: [{
+          sku: 'CHILD-001',
+          price: 99.99,
+          specialPrice: 60.00,
+          tierPrices: [{ customer_group_id: 2, qty: 1, value: 85.00 }]
+        }]
+      };
+
+      await service.updateMagentoPricesForInstance(priceData, mockScopedService, 2, 'store1', 'default');
+
+      // price becomes tier price (85.00), but specialPrice still flows through
+      expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 85.00, 60.00);
+    });
+  });
 });

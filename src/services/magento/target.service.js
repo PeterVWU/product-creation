@@ -67,15 +67,15 @@ class TargetService extends MagentoClient {
     return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, payload);
   }
 
-  async updateProductPrice(sku, price) {
-    logger.info('Updating product price in target', { sku, price });
-    const payload = {
-      product: {
-        sku,
-        price
-      }
-    };
-    return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, payload);
+  async updateProductPrice(sku, price, specialPrice = undefined) {
+    logger.info('Updating product price in target', { sku, price, specialPrice });
+    const product = { sku, price };
+    if (specialPrice !== undefined) {
+      product.custom_attributes = [
+        { attribute_code: 'special_price', value: specialPrice }
+      ];
+    }
+    return await this.put(`/rest/V1/products/${encodeURIComponent(sku)}`, { product });
   }
 
   async updateProductWeight(sku, weight) {

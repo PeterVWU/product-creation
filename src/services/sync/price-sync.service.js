@@ -321,7 +321,7 @@ class PriceSyncService {
           ? this.getTierPrice(child, groupId) || child.price
           : child.price;
 
-        await service.updateProductPrice(child.sku, price);
+        await service.updateProductPrice(child.sku, price, child.specialPrice);
         variantsUpdated++;
         logger.debug('Variant price updated', {
           sku: child.sku,
