@@ -671,12 +671,17 @@ class ShopifyTargetService extends ShopifyClient {
       }
     `;
 
-    const variants = variantPrices.map(v => ({
-      id: v.id,
-      ...(v.updateCompareAt
-        ? { compareAtPrice: String(v.price) }
-        : { price: String(v.price) })
-    }));
+    const variants = variantPrices.map(v => {
+      if (v.updateCompareAt) {
+        // Legacy tier store shape: only update compareAtPrice
+        return { id: v.id, compareAtPrice: String(v.price) };
+      }
+      const variant = { id: v.id, price: String(v.price) };
+      if ('compareAtPrice' in v) {
+        variant.compareAtPrice = v.compareAtPrice != null ? String(v.compareAtPrice) : null;
+      }
+      return variant;
+    });
 
     const variables = {
       productId,
