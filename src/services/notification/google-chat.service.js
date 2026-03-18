@@ -204,6 +204,92 @@ class GoogleChatService {
     await this.sendMessage(card);
   }
 
+  async notifyProductUpdateStart(sku, targetStores = []) {
+    const widgets = [
+      {
+        decoratedText: {
+          text: `<b>SKU:</b> ${sku}`
+        }
+      }
+    ];
+
+    if (targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+    }
+
+    const card = {
+      cardsV2: [{
+        cardId: 'product-update-start',
+        card: {
+          sections: [{
+            header: '✏️ Product Fields Update Started',
+            widgets
+          }]
+        }
+      }]
+    };
+
+    await this.sendMessage(card);
+  }
+
+  async notifyProductUpdateEnd({ sku, success, errors = [], targetStores = [], duration }) {
+    const statusText = success ? 'Completed Successfully' : 'Failed';
+    const sectionHeader = success ? '✅ Product Fields Update Completed' : '❌ Product Fields Update Failed';
+
+    const widgets = [
+      {
+        decoratedText: {
+          text: `<b>SKU:</b> ${sku}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Status:</b> ${statusText}`
+        }
+      },
+      {
+        decoratedText: {
+          text: `<b>Duration:</b> ${duration}ms`
+        }
+      }
+    ];
+
+    if (!success && errors && errors.length > 0) {
+      const errorMessage = errors[errors.length - 1].message;
+      widgets.push({
+        decoratedText: {
+          text: `<b>Error:</b> ${errorMessage}`
+        }
+      });
+    }
+
+    if (targetStores.length > 0) {
+      widgets.push({
+        decoratedText: {
+          text: `<b>Target Stores:</b> ${targetStores.join(', ')}`
+        }
+      });
+    }
+
+    const card = {
+      cardsV2: [{
+        cardId: 'product-update-end',
+        card: {
+          sections: [{
+            header: sectionHeader,
+            widgets
+          }]
+        }
+      }]
+    };
+
+    await this.sendMessage(card);
+  }
+
   async notifyMigrationEnd(migrationContext) {
     const { sku, success, summary, errors, productId, targetStores, targetMagentoStores, storeResults, shopifyProductUrl } = migrationContext;
     const resolvedTargetStores = targetStores || targetMagentoStores || [];
