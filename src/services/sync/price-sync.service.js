@@ -570,8 +570,9 @@ class PriceSyncService {
         updates: pricesToUpdate.map(p => ({
           id: p.id,
           newPrice: p.price,
+          newCompareAtPrice: p.compareAtPrice,
           updateCompareAt: p.updateCompareAt,
-          field: p.updateCompareAt ? 'compareAtPrice' : 'price'
+          field: p.updateCompareAt ? 'compareAtPrice' : ('compareAtPrice' in p ? 'price+compareAtPrice' : 'price')
         }))
       });
 
