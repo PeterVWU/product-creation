@@ -172,6 +172,16 @@ describe('PriceSyncService', () => {
       expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 99.99, null);
     });
 
+    it('passes undefined specialPrice when child has no specialPrice field', async () => {
+      const priceData = {
+        children: [{ sku: 'CHILD-001', price: 99.99, tierPrices: [] }] // no specialPrice field
+      };
+
+      await service.updateMagentoPricesForInstance(priceData, mockScopedService, null, 'store1', 'default');
+
+      expect(mockScopedService.updateProductPrice).toHaveBeenCalledWith('CHILD-001', 99.99, undefined);
+    });
+
     it('uses tier price for price but still passes specialPrice', async () => {
       const priceData = {
         children: [{

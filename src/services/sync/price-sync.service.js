@@ -326,6 +326,7 @@ class PriceSyncService {
         logger.debug('Variant price updated', {
           sku: child.sku,
           price,
+          specialPrice: child.specialPrice,
           instanceName,
           storeCode
         });
