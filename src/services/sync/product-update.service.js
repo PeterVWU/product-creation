@@ -314,6 +314,131 @@ class ProductUpdateService {
   }
 
   /**
+   * Main entry point: update content fields for one SKU across all target stores.
+   * @param {string} sku - Source product SKU
+   * @param {Object} options
+   */
+  async updateProductFields(sku, options = {}) {
+    const startTime = Date.now();
+
+    const targetMagentoStores = this.resolveMagentoTargetStores(options.targetMagentoStores);
+    const targetShopifyStores = this.resolveShopifyTargetStores(options.targetShopifyStores);
+    const allTargetStores = [
+      ...targetMagentoStores,
+      ...targetShopifyStores.map(s => `shopify:${s}`)
+    ];
+
+    const result = {
+      success: true,
+      sku,
+      results: { magento: {}, shopify: {} },
+      errors: [],
+      warnings: []
+    };
+
+    // Extraction — throws if product not found (no notifications sent)
+    const sourceProduct = await this.sourceService.getProductBySku(sku);
+    if (!sourceProduct) {
+      throw new Error(`Product not found in source: ${sku}`);
+    }
+
+    const productType = this.classifyProductType(sourceProduct);
+
+    const brandLabel = await this.attributeService.translateBrandAttribute(sourceProduct);
+
+    const categoryIds = (sourceProduct.extension_attributes?.category_links || []).map(l => l.category_id);
+    const categoryTranslations = await this.attributeService.translateCategories(categoryIds);
+    const categories = Object.entries(categoryTranslations).map(([id, name]) => ({ id, name }));
+
+    // For configurable products, get first child SKU for Shopify lookup
+    let firstChildSku = null;
+    if (productType === 'configurable') {
+      const childLinks = this.extractChildLinks(sourceProduct);
+      if (childLinks.length === 0) {
+        throw new ExtractionError(`Configurable product has no child links; cannot locate product in Shopify. SKU: ${sku}`);
+      }
+      firstChildSku = childLinks[0].sku || null;
+    }
+
+    const extractedData = {
+      sourceProduct,
+      productType,
+      brandLabel,
+      categories,
+      firstChildSku
+    };
+
+    logger.info('Extraction complete, starting store updates', { sku, productType, brandLabel });
+
+    // Start notification (after successful extraction)
+    await this.googleChatService.notifyProductUpdateStart(sku, allTargetStores);
+
+    let extractionSucceeded = true;
+
+    try {
+      // Magento updates
+      const includeMagento = options.includeMagento !== false;
+      if (includeMagento) {
+        for (const storeName of targetMagentoStores) {
+          try {
+            const storeResult = await this.updateMagentoStore(storeName, extractedData);
+            result.results.magento[storeName] = storeResult;
+            if (!storeResult.success) result.success = false;
+            if (storeResult.warnings?.length) result.warnings.push(...storeResult.warnings.map(w => ({ store: storeName, ...w })));
+          } catch (error) {
+            result.results.magento[storeName] = { success: false, error: error.message };
+            result.errors.push({ store: storeName, message: error.message });
+            result.success = false;
+            logger.error('Uncaught error updating Magento store', { storeName, sku, error: error.message });
+            if (!config.errorHandling.continueOnError) break;
+          }
+        }
+      }
+
+      // Shopify updates
+      const includeShopify = options.includeShopify !== false;
+      if (includeShopify) {
+        for (const storeName of targetShopifyStores) {
+          try {
+            const storeResult = await this.updateShopifyStore(storeName, extractedData);
+            result.results.shopify[storeName] = storeResult;
+            if (!storeResult.success) result.success = false;
+            if (storeResult.warnings?.length) result.warnings.push(...storeResult.warnings.map(w => ({ store: storeName, ...w })));
+          } catch (error) {
+            result.results.shopify[storeName] = { success: false, error: error.message };
+            result.errors.push({ store: storeName, message: error.message });
+            result.success = false;
+            logger.error('Uncaught error updating Shopify store', { storeName, sku, error: error.message });
+            if (!config.errorHandling.continueOnError) break;
+          }
+        }
+      }
+
+      if (result.errors.length > 0) result.success = false;
+
+      const duration = Date.now() - startTime;
+      await this.googleChatService.notifyProductUpdateEnd({
+        sku, success: result.success, errors: result.errors, targetStores: allTargetStores, duration
+      });
+
+      return result;
+    } catch (error) {
+      result.success = false;
+      result.errors.push({ phase: 'update', message: error.message });
+
+      const duration = Date.now() - startTime;
+
+      if (extractionSucceeded) {
+        await this.googleChatService.notifyProductUpdateEnd({
+          sku, success: false, errors: result.errors, targetStores: allTargetStores, duration
+        });
+      }
+
+      return result;
+    }
+  }
+
+  /**
    * Query all media IDs for a Shopify product.
    * @private
    */

@@ -378,4 +378,104 @@ describe('ProductUpdateService', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  // ── updateProductFields (main entry point) ────────────────────────────────
+
+  describe('updateProductFields', () => {
+    const sourceProduct = {
+      sku: 'PARENT-001',
+      name: 'My Product',
+      type_id: 'configurable',
+      visibility: 4,
+      price: 99,
+      media_gallery_entries: [],
+      custom_attributes: [
+        { attribute_code: 'description', value: '<p>desc</p>' },
+        { attribute_code: 'brand', value: '42' },
+        { attribute_code: 'meta_title', value: 'MT' },
+        { attribute_code: 'meta_keyword', value: 'kw1' },
+        { attribute_code: 'meta_description', value: 'MD' }
+      ],
+      extension_attributes: {
+        category_links: [{ category_id: '5' }],
+        configurable_product_link_data: [
+          JSON.stringify({ simple_product_sku: 'CHILD-001', simple_product_id: 1 })
+        ]
+      }
+    };
+
+    beforeEach(() => {
+      service.sourceService.getProductBySku = jest.fn().mockResolvedValue(sourceProduct);
+      service.attributeService.translateBrandAttribute = jest.fn().mockResolvedValue('BrandCo');
+      service.attributeService.translateCategories = jest.fn().mockResolvedValue({ '5': 'Vapes' });
+      service.googleChatService.notifyProductUpdateStart = jest.fn().mockResolvedValue(undefined);
+      service.googleChatService.notifyProductUpdateEnd = jest.fn().mockResolvedValue(undefined);
+      service.updateMagentoStore = jest.fn().mockResolvedValue({ success: true, warnings: [] });
+      service.updateShopifyStore = jest.fn().mockResolvedValue({ success: true, warnings: [] });
+    });
+
+    it('throws immediately when source product not found', async () => {
+      service.sourceService.getProductBySku.mockResolvedValue(null);
+      await expect(service.updateProductFields('MISSING-SKU')).rejects.toThrow();
+      expect(service.googleChatService.notifyProductUpdateStart).not.toHaveBeenCalled();
+    });
+
+    it('sends start notification after extraction', async () => {
+      await service.updateProductFields('PARENT-001', {
+        targetMagentoStores: ['ejuices'],
+        targetShopifyStores: []
+      });
+      expect(service.googleChatService.notifyProductUpdateStart).toHaveBeenCalledWith(
+        'PARENT-001',
+        expect.any(Array)
+      );
+    });
+
+    it('calls updateMagentoStore for each resolved Magento store', async () => {
+      await service.updateProductFields('PARENT-001', {
+        targetMagentoStores: ['ejuices'],
+        includeShopify: false
+      });
+      expect(service.updateMagentoStore).toHaveBeenCalledWith('ejuices', expect.any(Object));
+    });
+
+    it('calls updateShopifyStore for each resolved Shopify store', async () => {
+      await service.updateProductFields('PARENT-001', {
+        targetShopifyStores: ['myshopify'],
+        includeMagento: false
+      });
+      expect(service.updateShopifyStore).toHaveBeenCalledWith('myshopify', expect.any(Object));
+    });
+
+    it('sends end notification on success', async () => {
+      await service.updateProductFields('PARENT-001', { targetMagentoStores: ['ejuices'], includeShopify: false });
+      expect(service.googleChatService.notifyProductUpdateEnd).toHaveBeenCalledWith(
+        expect.objectContaining({ sku: 'PARENT-001', success: true })
+      );
+    });
+
+    it('sends end notification even when a store update fails', async () => {
+      service.updateMagentoStore.mockResolvedValue({ success: false, error: 'not found' });
+      await service.updateProductFields('PARENT-001', { targetMagentoStores: ['ejuices'], includeShopify: false });
+      expect(service.googleChatService.notifyProductUpdateEnd).toHaveBeenCalled();
+    });
+
+    it('returns result.success false when any store fails', async () => {
+      service.updateMagentoStore.mockResolvedValue({ success: false, error: 'not found' });
+      const result = await service.updateProductFields('PARENT-001', {
+        targetMagentoStores: ['ejuices'], includeShopify: false
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('skips Magento when includeMagento is false', async () => {
+      await service.updateProductFields('PARENT-001', { includeMagento: false, includeShopify: false });
+      expect(service.updateMagentoStore).not.toHaveBeenCalled();
+    });
+
+    it('skips Shopify when includeShopify is false', async () => {
+      await service.updateProductFields('PARENT-001', { includeMagento: false, includeShopify: false });
+      expect(service.updateShopifyStore).not.toHaveBeenCalled();
+    });
+  });
 });
