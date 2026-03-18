@@ -245,6 +245,100 @@ class ProductUpdateService {
     logger.info('Magento store update complete', { storeName, sku, warnings: warnings.length });
     return { success: true, warnings };
   }
+
+  /**
+   * Update content fields for one Shopify store.
+   * @param {string} storeName
+   * @param {Object} extractedData - { sourceProduct, productType, brandLabel, categories, firstChildSku }
+   * @returns {Object} { success, warnings, error? }
+   */
+  async updateShopifyStore(storeName, extractedData) {
+    const { sourceProduct, productType, brandLabel, categories, firstChildSku } = extractedData;
+    const sku = sourceProduct.sku;
+    const storeConfig = this.shopifyStores[storeName];
+    const warnings = [];
+
+    const shopifyService = new ShopifyTargetService(
+      storeConfig.url,
+      storeConfig.token,
+      { apiVersion: config.shopify.apiVersion }
+    );
+
+    // 1. Existence check
+    const lookupSku = productType === 'configurable' ? firstChildSku : sku;
+    const variants = await shopifyService.getVariantsBySkus([lookupSku]);
+    if (!variants || variants.length === 0) {
+      return { success: false, error: 'Product not found in target store' };
+    }
+    const productId = variants[0].product.id;
+
+    // 2. Category mapping
+    const sourceCategoryNames = (categories || []).map(c => c.name);
+    const shopifyProductType = this.categoryMappingService.getShopifyProductType(sourceCategoryNames, storeName) || '';
+
+    // 3. Update product fields
+    const description = this.extractCustomAttribute(sourceProduct, 'description');
+    const metaTitle = this.extractCustomAttribute(sourceProduct, 'meta_title');
+    const metaDescription = this.extractCustomAttribute(sourceProduct, 'meta_description');
+    const metaKeyword = this.extractCustomAttribute(sourceProduct, 'meta_keyword');
+    const tags = this.parseMetaKeywordsToTags(metaKeyword);
+
+    await shopifyService.updateProductFields(productId, {
+      title: sourceProduct.name,
+      vendor: brandLabel,
+      descriptionHtml: description || '',
+      productType: shopifyProductType,
+      seoTitle: metaTitle,
+      seoDescription: metaDescription,
+      tags
+    });
+
+    // 4. Image replace (best-effort — failure recorded as warning)
+    try {
+      const imageUrls = this.buildSourceImageUrls(sourceProduct.media_gallery_entries || []);
+
+      // Get current media IDs from the product
+      const mediaIds = await this._getShopifyProductMediaIds(shopifyService, productId);
+      await shopifyService.deleteAllProductMedia(productId, mediaIds);
+
+      if (imageUrls.length > 0) {
+        await shopifyService.createProductMedia(productId, imageUrls);
+      }
+    } catch (error) {
+      logger.warn('Image replace failed for Shopify store', { storeName, sku, error: error.message });
+      warnings.push({ field: 'images', message: `Image replace failed: ${error.message}` });
+    }
+
+    logger.info('Shopify store update complete', { storeName, sku });
+    return { success: true, warnings };
+  }
+
+  /**
+   * Query all media IDs for a Shopify product.
+   * @private
+   */
+  async _getShopifyProductMediaIds(shopifyService, productId) {
+    const query = `
+      query getProductMedia($id: ID!) {
+        product(id: $id) {
+          media(first: 100) {
+            edges {
+              node {
+                id
+              }
+            }
+          }
+        }
+      }
+    `;
+    try {
+      const result = await shopifyService.query(query, { id: productId });
+      return (result.data.product?.media?.edges || []).map(e => e.node.id);
+    } catch (error) {
+      logger.warn('Failed to fetch product media IDs', { productId, error: error.message });
+      return [];
+    }
+  }
 }
 
 module.exports = ProductUpdateService;

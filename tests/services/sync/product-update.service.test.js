@@ -271,4 +271,111 @@ describe('ProductUpdateService', () => {
       );
     });
   });
+
+  // ── updateShopifyStore ────────────────────────────────────────────────────
+
+  describe('updateShopifyStore', () => {
+    const ShopifyTargetService = require('../../../src/services/shopify/shopify-target.service');
+
+    const sourceProduct = {
+      sku: 'PARENT-001',
+      name: 'My Product',
+      media_gallery_entries: [{ file: '/a/img.jpg', label: 'Front' }],
+      custom_attributes: [
+        { attribute_code: 'description', value: '<p>desc</p>' },
+        { attribute_code: 'meta_title', value: 'MT' },
+        { attribute_code: 'meta_keyword', value: 'kw1, kw2' },
+        { attribute_code: 'meta_description', value: 'MD' }
+      ]
+    };
+
+    const extractedData = {
+      sourceProduct,
+      productType: 'configurable',
+      brandLabel: 'BrandCo',
+      categories: [{ id: '5', name: 'Vapes' }],
+      firstChildSku: 'CHILD-001'
+    };
+
+    let mockShopify;
+
+    beforeEach(() => {
+      mockShopify = {
+        getVariantsBySkus: jest.fn().mockResolvedValue([
+          { sku: 'CHILD-001', product: { id: 'gid://shopify/Product/123' } }
+        ]),
+        updateProductFields: jest.fn().mockResolvedValue({}),
+        deleteAllProductMedia: jest.fn().mockResolvedValue(undefined),
+        createProductMedia: jest.fn().mockResolvedValue([]),
+        query: jest.fn().mockResolvedValue({
+          data: {
+            product: {
+              media: {
+                edges: [{ node: { id: 'gid://shopify/MediaImage/1' } }]
+              }
+            }
+          }
+        })
+      };
+      ShopifyTargetService.mockImplementation(() => mockShopify);
+
+      service.categoryMappingService.getShopifyProductType = jest.fn().mockReturnValue('Accessories');
+    });
+
+    it('returns success: false when product not found', async () => {
+      mockShopify.getVariantsBySkus.mockResolvedValue([]);
+      const result = await service.updateShopifyStore('myshopify', extractedData);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not found/i);
+    });
+
+    it('looks up by firstChildSku for configurable products', async () => {
+      await service.updateShopifyStore('myshopify', extractedData);
+      expect(mockShopify.getVariantsBySkus).toHaveBeenCalledWith(['CHILD-001']);
+    });
+
+    it('looks up by sku directly for standalone simple products', async () => {
+      mockShopify.getVariantsBySkus.mockResolvedValue([
+        { sku: 'PARENT-001', product: { id: 'gid://shopify/Product/456' } }
+      ]);
+
+      const standaloneData = { ...extractedData, productType: 'standalone-simple' };
+      await service.updateShopifyStore('myshopify', standaloneData);
+
+      expect(mockShopify.getVariantsBySkus).toHaveBeenCalledWith(['PARENT-001']);
+    });
+
+    it('calls updateProductFields with mapped fields', async () => {
+      await service.updateShopifyStore('myshopify', extractedData);
+
+      expect(mockShopify.updateProductFields).toHaveBeenCalledWith(
+        'gid://shopify/Product/123',
+        expect.objectContaining({
+          title: 'My Product',
+          vendor: 'BrandCo',
+          descriptionHtml: '<p>desc</p>',
+          productType: 'Accessories',
+          seoTitle: 'MT',
+          seoDescription: 'MD',
+          tags: ['kw1', 'kw2']
+        })
+      );
+    });
+
+    it('returns success: true even when image replace fails', async () => {
+      mockShopify.deleteAllProductMedia.mockRejectedValue(new Error('cdn error'));
+
+      const result = await service.updateShopifyStore('myshopify', extractedData);
+
+      expect(result.success).toBe(true);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'images' })])
+      );
+    });
+
+    it('returns success: true on happy path', async () => {
+      const result = await service.updateShopifyStore('myshopify', extractedData);
+      expect(result.success).toBe(true);
+    });
+  });
 });
