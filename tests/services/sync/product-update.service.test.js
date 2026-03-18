@@ -161,4 +161,114 @@ describe('ProductUpdateService', () => {
       expect(service.buildSourceImageUrls([])).toEqual([]);
     });
   });
+
+  // ── updateMagentoStore ────────────────────────────────────────────────────
+
+  describe('updateMagentoStore', () => {
+    const TargetService = require('../../../src/services/magento/target.service');
+
+    const sourceProduct = {
+      sku: 'PARENT-001',
+      name: 'My Product',
+      media_gallery_entries: [{ id: 10, file: '/a/img.jpg', label: 'Front' }],
+      custom_attributes: [
+        { attribute_code: 'description', value: '<p>desc</p>' },
+        { attribute_code: 'brand', value: '42' },
+        { attribute_code: 'meta_title', value: 'MT' },
+        { attribute_code: 'meta_keyword', value: 'kw1, kw2' },
+        { attribute_code: 'meta_description', value: 'MD' }
+      ],
+      extension_attributes: {
+        category_links: [{ category_id: '5' }]
+      }
+    };
+
+    const extractedData = {
+      sourceProduct,
+      brandLabel: 'BrandCo',
+      categories: [{ id: '5', name: 'Vapes' }]
+    };
+
+    let mockTargetInstance;
+
+    beforeEach(() => {
+      mockTargetInstance = {
+        getProductBySku: jest.fn().mockResolvedValue({ sku: 'PARENT-001', media_gallery_entries: [] }),
+        ensureAttributeOptionExists: jest.fn().mockResolvedValue({ value: '99' }),
+        getCategoryIdByName: jest.fn().mockResolvedValue(7),
+        client: { put: jest.fn().mockResolvedValue({}) },
+        deleteAllProductMedia: jest.fn().mockResolvedValue(undefined),
+        uploadProductImage: jest.fn().mockResolvedValue({}),
+        getStoreWebsiteMapping: jest.fn().mockResolvedValue({ default: 1 }),
+        createScopedInstance: jest.fn().mockReturnValue({
+          updateProduct: jest.fn().mockResolvedValue({})
+        })
+      };
+      TargetService.getInstanceForStore = jest.fn().mockReturnValue(mockTargetInstance);
+
+      // Stub categoryMappingService
+      service.categoryMappingService.getTargetMagentoCategories = jest.fn().mockReturnValue(['Vapes']);
+
+      // Stub sourceService.downloadImage
+      service.sourceService.downloadImage = jest.fn().mockResolvedValue({
+        buffer: Buffer.from('img'),
+        contentType: 'image/jpeg'
+      });
+    });
+
+    it('returns success: false when product not found on target', async () => {
+      mockTargetInstance.getProductBySku.mockResolvedValue(null);
+
+      const result = await service.updateMagentoStore('ejuices', extractedData);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not found/i);
+    });
+
+    it('PUTs global fields via /rest/all/ endpoint', async () => {
+      await service.updateMagentoStore('ejuices', extractedData);
+
+      expect(mockTargetInstance.client.put).toHaveBeenCalledWith(
+        expect.stringContaining('/rest/all/V1/products/PARENT-001'),
+        expect.objectContaining({
+          product: expect.objectContaining({
+            sku: 'PARENT-001',
+            custom_attributes: expect.arrayContaining([
+              expect.objectContaining({ attribute_code: 'brand' })
+            ])
+          })
+        })
+      );
+    });
+
+    it('updates store-view scoped fields on each store view', async () => {
+      await service.updateMagentoStore('ejuices', extractedData);
+
+      expect(mockTargetInstance.getStoreWebsiteMapping).toHaveBeenCalled();
+      expect(mockTargetInstance.createScopedInstance).toHaveBeenCalledWith('default');
+      const scopedService = mockTargetInstance.createScopedInstance.mock.results[0].value;
+      expect(scopedService.updateProduct).toHaveBeenCalledWith(
+        'PARENT-001',
+        expect.objectContaining({
+          name: 'My Product'
+        })
+      );
+    });
+
+    it('returns success: true on happy path', async () => {
+      const result = await service.updateMagentoStore('ejuices', extractedData);
+      expect(result.success).toBe(true);
+    });
+
+    it('includes warning when brand translation fails', async () => {
+      mockTargetInstance.ensureAttributeOptionExists.mockRejectedValue(new Error('option error'));
+
+      const result = await service.updateMagentoStore('ejuices', extractedData);
+
+      expect(result.success).toBe(true);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'brand' })])
+      );
+    });
+  });
 });
