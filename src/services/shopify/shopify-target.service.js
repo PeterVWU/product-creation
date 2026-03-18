@@ -919,18 +919,22 @@ class ShopifyTargetService extends ShopifyClient {
       title,
       descriptionHtml,
       productType,
-      tags,
-      seo: {}
+      tags
     };
 
     if (vendor !== null && vendor !== undefined) {
       input.vendor = vendor;
     }
+
+    const seo = {};
     if (seoTitle !== null && seoTitle !== undefined) {
-      input.seo.title = seoTitle;
+      seo.title = seoTitle;
     }
     if (seoDescription !== null && seoDescription !== undefined) {
-      input.seo.description = seoDescription;
+      seo.description = seoDescription;
+    }
+    if (Object.keys(seo).length > 0) {
+      input.seo = seo;
     }
 
     const mutation = `

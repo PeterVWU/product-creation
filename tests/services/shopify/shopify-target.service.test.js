@@ -174,6 +174,20 @@ describe('ShopifyTargetService', () => {
       expect(input.seo.description).toBe('desc');
     });
 
+    it('omits seo entirely when both seoTitle and seoDescription are null', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: { productUpdate: { product: { id: 'gid://shopify/Product/123' }, userErrors: [] } }
+      });
+
+      await service.updateProductFields('gid://shopify/Product/123', {
+        title: 'T', vendor: 'B', descriptionHtml: '', productType: '',
+        seoTitle: null, seoDescription: null, tags: []
+      });
+
+      const input = service.query.mock.calls[0][1].input;
+      expect(input.seo).toBeUndefined();
+    });
+
     it('throws when userErrors are returned', async () => {
       service.query = jest.fn().mockResolvedValue({
         data: {
