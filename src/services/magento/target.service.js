@@ -192,6 +192,32 @@ class TargetService extends MagentoClient {
     }
   }
 
+  /**
+   * Delete all media entries for a product. Best-effort — individual failures are logged and skipped.
+   * @param {string} sku - Product SKU
+   * @param {Array} mediaEntries - Array of media entry objects with at least an `id` field
+   */
+  async deleteAllProductMedia(sku, mediaEntries) {
+    if (!mediaEntries || mediaEntries.length === 0) return;
+
+    logger.info('Deleting all product media', { sku, count: mediaEntries.length });
+
+    for (const entry of mediaEntries) {
+      try {
+        await this.delete(`/rest/V1/products/${encodeURIComponent(sku)}/media/${entry.id}`);
+        logger.debug('Deleted media entry', { sku, entryId: entry.id });
+      } catch (error) {
+        logger.warn('Failed to delete media entry, skipping', {
+          sku,
+          entryId: entry.id,
+          error: error.message
+        });
+      }
+    }
+
+    logger.info('Product media deletion complete', { sku });
+  }
+
   async createConfigurableOptions(sku, options) {
     logger.info('Creating configurable options', { sku, optionsCount: options.length });
 
