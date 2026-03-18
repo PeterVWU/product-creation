@@ -15,7 +15,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Shopify migration support** - migrate Magento products to Shopify stores using GraphQL Admin API
 - Health check endpoints
 - Real-time Google Chat notifications for migration and price sync status
-- **Price synchronization** - sync prices from source to target Magento stores and Shopify
+- **Price synchronization** - sync regular and special prices from source to target Magento stores and Shopify; supports both configurable and standalone simple products
 - **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
 
 ## Prerequisites
@@ -410,6 +410,8 @@ Migrate multiple configurable products sequentially.
 
 Synchronize prices from source Magento to target Magento stores and/or Shopify stores. Fetches current prices from source and updates them on all specified target platforms.
 
+Supports both **configurable products** (syncs all child variant prices) and **standalone simple products** (treated as a single variant — `variantCount` will be 1).
+
 **Request Body:**
 ```json
 {
@@ -424,7 +426,7 @@ Synchronize prices from source Magento to target Magento stores and/or Shopify s
 ```
 
 **Parameters:**
-- `sku` (required): The SKU of the configurable product whose prices to sync
+- `sku` (required): The SKU of the product whose prices to sync (configurable or standalone simple)
 - `options` (optional):
   - `targetMagentoStores` (array of strings): Names of target Magento instances (e.g., `["ejuices", "misthub"]`). If omitted, syncs to all configured Magento instances
   - `targetShopifyStores` (array of strings): Target Shopify store names from `SHOPIFY_STORES` config. If omitted, syncs to all configured Shopify stores
@@ -488,6 +490,19 @@ curl -X POST http://localhost:3000/api/v1/sync/prices \
     }
   }'
 ```
+
+**Special Price Sync:**
+
+The sync service reads the source product's `special_price` custom attribute and propagates it to all targets:
+
+| Target | `price` | `special_price` / `compareAtPrice` |
+|--------|---------|-------------------------------------|
+| **Magento** | regular price | `special_price` (null clears any existing value) |
+| **Shopify (non-tier store)** | `special_price` (if valid) | `compareAtPrice` = regular price |
+| **Shopify (non-tier store, no special price)** | regular price | `compareAtPrice` = null (cleared) |
+| **Shopify (tier store)** | tier price for configured group | existing `compareAtPrice` logic unchanged |
+
+A `special_price` is considered valid when it is a positive number **and** less than the regular price. If `special_price >= price`, it is ignored on the Shopify path (treated as no special price) and a warning is logged; on the Magento path it is synced as-is.
 
 **Note:** Price sync uses scoped Magento API endpoints (`/rest/{storeCode}/V1/products`) to ensure prices are updated for each store view individually. Non-scoped updates only affect the global/default price and don't propagate to store views with existing price overrides.
 
