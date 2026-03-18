@@ -104,6 +104,95 @@ describe('ShopifyTargetService', () => {
     });
   });
 
+  describe('updateProductFields', () => {
+    it('calls productUpdate mutation with all provided fields', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: {
+          productUpdate: {
+            product: { id: 'gid://shopify/Product/123', title: 'New Name' },
+            userErrors: []
+          }
+        }
+      });
+
+      const fields = {
+        title: 'New Name',
+        vendor: 'BrandCo',
+        descriptionHtml: '<p>desc</p>',
+        productType: 'Accessories',
+        seoTitle: 'SEO Title',
+        seoDescription: 'SEO Desc',
+        tags: ['kw1', 'kw2']
+      };
+
+      await service.updateProductFields('gid://shopify/Product/123', fields);
+
+      const callArgs = service.query.mock.calls[0];
+      expect(callArgs[0]).toContain('productUpdate');
+      expect(callArgs[1].input).toMatchObject({
+        id: 'gid://shopify/Product/123',
+        title: 'New Name',
+        vendor: 'BrandCo',
+        descriptionHtml: '<p>desc</p>',
+        productType: 'Accessories',
+        seo: { title: 'SEO Title', description: 'SEO Desc' },
+        tags: ['kw1', 'kw2']
+      });
+    });
+
+    it('omits vendor from input when it is null', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: { productUpdate: { product: { id: 'gid://shopify/Product/123' }, userErrors: [] } }
+      });
+
+      await service.updateProductFields('gid://shopify/Product/123', {
+        title: 'Test',
+        vendor: null,
+        descriptionHtml: '',
+        productType: '',
+        seoTitle: null,
+        seoDescription: null,
+        tags: []
+      });
+
+      const input = service.query.mock.calls[0][1].input;
+      expect(input.vendor).toBeUndefined();
+    });
+
+    it('omits seo.title when seoTitle is null', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: { productUpdate: { product: { id: 'gid://shopify/Product/123' }, userErrors: [] } }
+      });
+
+      await service.updateProductFields('gid://shopify/Product/123', {
+        title: 'T', vendor: 'B', descriptionHtml: '', productType: '',
+        seoTitle: null, seoDescription: 'desc', tags: []
+      });
+
+      const input = service.query.mock.calls[0][1].input;
+      expect(input.seo.title).toBeUndefined();
+      expect(input.seo.description).toBe('desc');
+    });
+
+    it('throws when userErrors are returned', async () => {
+      service.query = jest.fn().mockResolvedValue({
+        data: {
+          productUpdate: {
+            product: null,
+            userErrors: [{ field: 'title', message: 'is blank' }]
+          }
+        }
+      });
+
+      await expect(
+        service.updateProductFields('gid://shopify/Product/123', {
+          title: '', vendor: null, descriptionHtml: '', productType: '',
+          seoTitle: null, seoDescription: null, tags: []
+        })
+      ).rejects.toThrow('is blank');
+    });
+  });
+
   describe('deleteAllProductMedia', () => {
     it('calls productDeleteMedia mutation with all media IDs', async () => {
       service.query = jest.fn().mockResolvedValue({

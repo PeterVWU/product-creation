@@ -896,6 +896,77 @@ class ShopifyTargetService extends ShopifyClient {
   }
 
   /**
+   * Update product content fields using the productUpdate mutation.
+   * Null values for optional fields (vendor, seoTitle, seoDescription) are omitted
+   * to preserve existing Shopify values.
+   * @param {string} productId - Shopify product GID
+   * @param {Object} fields
+   * @param {string} fields.title
+   * @param {string|null} fields.vendor
+   * @param {string} fields.descriptionHtml
+   * @param {string} fields.productType
+   * @param {string|null} fields.seoTitle
+   * @param {string|null} fields.seoDescription
+   * @param {string[]} fields.tags
+   */
+  async updateProductFields(productId, fields) {
+    logger.info('Updating product fields in Shopify', { productId });
+
+    const { title, vendor, descriptionHtml, productType, seoTitle, seoDescription, tags } = fields;
+
+    const input = {
+      id: productId,
+      title,
+      descriptionHtml,
+      productType,
+      tags,
+      seo: {}
+    };
+
+    if (vendor !== null && vendor !== undefined) {
+      input.vendor = vendor;
+    }
+    if (seoTitle !== null && seoTitle !== undefined) {
+      input.seo.title = seoTitle;
+    }
+    if (seoDescription !== null && seoDescription !== undefined) {
+      input.seo.description = seoDescription;
+    }
+
+    const mutation = `
+      mutation productUpdate($input: ProductInput!) {
+        productUpdate(input: $input) {
+          product {
+            id
+            title
+            vendor
+            productType
+            tags
+            seo {
+              title
+              description
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const result = await this.query(mutation, { input });
+
+    const errors = result.data.productUpdate.userErrors;
+    if (errors && errors.length > 0) {
+      throw new Error(`Product update failed: ${errors.map(e => e.message).join(', ')}`);
+    }
+
+    logger.info('Product fields updated in Shopify', { productId });
+    return result.data.productUpdate.product;
+  }
+
+  /**
    * Delete all media from a Shopify product by media ID list.
    * Throws if the mutation returns userErrors.
    * @param {string} productId - Shopify product GID
