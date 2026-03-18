@@ -176,6 +176,7 @@ class PriceSyncService {
             priceData.children.push({
               sku: child.sku,
               price: child.price,
+              specialPrice: this.extractSpecialPrice(child),
               tierPrices: child.tier_prices || []
             });
           }
@@ -368,6 +369,20 @@ class PriceSyncService {
     }
 
     return null;
+  }
+
+  /**
+   * Extract special_price from Magento custom_attributes array.
+   * Returns a positive float, or null if absent/invalid/zero.
+   * @param {Object} product - Magento product object
+   * @returns {number|null}
+   */
+  extractSpecialPrice(product) {
+    const attr = (product.custom_attributes || [])
+      .find(a => a.attribute_code === 'special_price');
+    if (!attr?.value) return null;
+    const v = parseFloat(attr.value);
+    return (isNaN(v) || v <= 0) ? null : v;
   }
 
   /**
