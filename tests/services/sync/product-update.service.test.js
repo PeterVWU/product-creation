@@ -377,6 +377,17 @@ describe('ProductUpdateService', () => {
       const result = await service.updateShopifyStore('myshopify', extractedData);
       expect(result.success).toBe(true);
     });
+
+    it('records warning when media ID fetch fails', async () => {
+      mockShopify.query.mockRejectedValue(new Error('GraphQL error'));
+
+      const result = await service.updateShopifyStore('myshopify', extractedData);
+
+      expect(result.success).toBe(true);
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'images' })])
+      );
+    });
   });
 
   // ── updateProductFields (main entry point) ────────────────────────────────

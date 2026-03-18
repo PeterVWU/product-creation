@@ -460,13 +460,8 @@ class ProductUpdateService {
         }
       }
     `;
-    try {
-      const result = await shopifyService.query(query, { id: productId });
-      return (result.data.product?.media?.edges || []).map(e => e.node.id);
-    } catch (error) {
-      logger.warn('Failed to fetch product media IDs', { productId, error: error.message });
-      return [];
-    }
+    const result = await shopifyService.query(query, { id: productId });
+    return (result.data.product?.media?.edges || []).map(e => e.node.id);
   }
 }
 
