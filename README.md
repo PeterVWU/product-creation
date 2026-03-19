@@ -526,14 +526,14 @@ Push a fixed set of content fields from source Magento to one or more target Mag
 
 | Field | Source (Magento) | Target Magento | Target Shopify |
 |-------|-----------------|----------------|----------------|
-| Product name | `name` | `name` (per store view) | `title` |
+| Product name | `name` | `name` (global scope) | `title` |
 | Brand | `brand` custom attribute | `brand` custom attribute | `vendor` |
 | Categories | `category_ids` / `category_links` | `extension_attributes.category_links` | `productType` |
 | Images | `media_gallery_entries` | replaces all existing media | replaces all existing media |
-| Description | `description` custom attribute | `description` custom attribute (per store view) | `descriptionHtml` |
-| SEO meta title | `meta_title` | `meta_title` (per store view) | `seo.title` |
-| SEO meta keywords | `meta_keyword` | `meta_keyword` (per store view) | `tags` (split by comma) |
-| SEO meta description | `meta_description` | `meta_description` (per store view) | `seo.description` |
+| Description | `description` custom attribute | `description` custom attribute (global scope) | `descriptionHtml` |
+| SEO meta title | `meta_title` | `meta_title` (global scope) | `seo.title` |
+| SEO meta keywords | `meta_keyword` | `meta_keyword` (global scope) | `tags` (split by comma) |
+| SEO meta description | `meta_description` | `meta_description` (global scope) | `seo.description` |
 
 **How it works:**
 
@@ -542,9 +542,8 @@ Push a fixed set of content fields from source Magento to one or more target Mag
    - Checks the product exists on the target; skips with `success: false` if not found
    - Translates brand label to the target instance's option ID
    - Maps source category names to target category IDs using the category mapping config
-   - Writes brand and categories globally via `/rest/all/V1/products/{sku}` (global-scope attributes)
+   - Writes all fields (brand, categories, name, description, SEO) via a single `/rest/all/V1/products/{sku}` PUT (global scope — inherited by all store views)
    - Deletes all existing images, then re-uploads source images
-   - Writes name, description, and SEO fields to every store view via scoped endpoints (`/rest/{storeCode}/V1/...`)
 3. **Shopify update (per store):**
    - For configurable products: looks up the product by first child variant SKU
    - For standalone simple products: looks up the product by the product SKU directly

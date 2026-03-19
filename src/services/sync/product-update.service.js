@@ -162,16 +162,27 @@ class ProductUpdateService {
       warnings.push({ field: 'categories', message: `Category mapping failed: ${error.message}` });
     }
 
-    // 4. PUT global fields via /rest/all/
-    const globalCustomAttributes = [];
-    if (brandOptionId) {
-      globalCustomAttributes.push({ attribute_code: 'brand', value: brandOptionId });
-    }
+    // 4. Build content fields from source
+    const description = this.extractCustomAttribute(sourceProduct, 'description');
+    const metaTitle = this.extractCustomAttribute(sourceProduct, 'meta_title');
+    const metaKeyword = this.extractCustomAttribute(sourceProduct, 'meta_keyword');
+    const metaDescription = this.extractCustomAttribute(sourceProduct, 'meta_description');
 
-    const globalPayload = {
+    const customAttributes = [];
+    if (brandOptionId) {
+      customAttributes.push({ attribute_code: 'brand', value: brandOptionId });
+    }
+    if (description !== null) customAttributes.push({ attribute_code: 'description', value: description });
+    if (metaTitle !== null) customAttributes.push({ attribute_code: 'meta_title', value: metaTitle });
+    if (metaKeyword !== null) customAttributes.push({ attribute_code: 'meta_keyword', value: metaKeyword });
+    if (metaDescription !== null) customAttributes.push({ attribute_code: 'meta_description', value: metaDescription });
+
+    // 5. PUT all fields via /rest/all/ (sets global default for new store views)
+    const payload = {
       product: {
         sku,
-        custom_attributes: globalCustomAttributes,
+        name: sourceProduct.name,
+        custom_attributes: customAttributes,
         extension_attributes: {
           category_links: categoryIds.map(catId => ({ category_id: catId, position: 0 }))
         }
@@ -180,10 +191,10 @@ class ProductUpdateService {
 
     await targetService.client.put(
       `/rest/all/V1/products/${encodeURIComponent(sku)}`,
-      globalPayload
+      payload
     );
 
-    // 5. Image replace
+    // 6. Image replace
     try {
       const mediaEntries = existingProduct.media_gallery_entries || [];
       await targetService.deleteAllProductMedia(sku, mediaEntries);
@@ -207,39 +218,6 @@ class ProductUpdateService {
     } catch (error) {
       logger.warn('Image replace failed', { storeName, sku, error: error.message });
       warnings.push({ field: 'images', message: `Image replace failed: ${error.message}` });
-    }
-
-    // ── Step B: Store-view-scoped fields (per store view) ────────────────
-
-    const storeWebsiteMapping = await targetService.getStoreWebsiteMapping();
-    const storeCodes = Object.keys(storeWebsiteMapping).filter(code => code !== 'admin');
-
-    const description = this.extractCustomAttribute(sourceProduct, 'description');
-    const metaTitle = this.extractCustomAttribute(sourceProduct, 'meta_title');
-    const metaKeyword = this.extractCustomAttribute(sourceProduct, 'meta_keyword');
-    const metaDescription = this.extractCustomAttribute(sourceProduct, 'meta_description');
-
-    const scopedCustomAttributes = [];
-    if (description !== null) scopedCustomAttributes.push({ attribute_code: 'description', value: description });
-    if (metaTitle !== null) scopedCustomAttributes.push({ attribute_code: 'meta_title', value: metaTitle });
-    if (metaKeyword !== null) scopedCustomAttributes.push({ attribute_code: 'meta_keyword', value: metaKeyword });
-    if (metaDescription !== null) scopedCustomAttributes.push({ attribute_code: 'meta_description', value: metaDescription });
-
-    const scopedProductData = {
-      sku,
-      name: sourceProduct.name,
-      custom_attributes: scopedCustomAttributes
-    };
-
-    for (const storeCode of storeCodes) {
-      const scopedService = targetService.createScopedInstance(storeCode);
-      try {
-        await scopedService.updateProduct(sku, scopedProductData);
-        logger.debug('Store-view fields updated', { storeName, storeCode, sku });
-      } catch (error) {
-        logger.warn('Failed to update store-view fields', { storeName, storeCode, sku, error: error.message });
-        warnings.push({ field: 'store-view', message: `Store view ${storeCode} update failed: ${error.message}` });
-      }
     }
 
     logger.info('Magento store update complete', { storeName, sku, warnings: warnings.length });
