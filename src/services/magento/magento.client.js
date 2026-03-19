@@ -2,7 +2,7 @@ const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const logger = require('../../config/logger');
 const { MagentoAPIError } = require('../../utils/error-handler');
-const { extractErrorMessage } = require('../../utils/helpers');
+const { extractErrorMessage, sanitizeLogPayload } = require('../../utils/helpers');
 
 class MagentoClient {
   constructor(baseUrl, token, config = {}) {
@@ -54,7 +54,7 @@ class MagentoClient {
         logger.info('Magento API Request', {
           method: config.method?.toUpperCase(),
           url: fullUrl,
-          payload: config.data || null
+          payload: config.data ? sanitizeLogPayload(config.data) : null
         });
         return config;
       },
