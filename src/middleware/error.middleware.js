@@ -1,4 +1,5 @@
 const logger = require('../config/logger');
+const { sanitizeLogPayload } = require('../utils/helpers');
 const {
   MagentoAPIError,
   ValidationError,
@@ -15,7 +16,7 @@ const errorMiddleware = (err, req, res, next) => {
     stack: err.stack,
     path: req.path,
     method: req.method,
-    body: req.body
+    body: sanitizeLogPayload(req.body)
   });
 
   if (err instanceof ValidationError) {
