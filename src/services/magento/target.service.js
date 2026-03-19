@@ -1,7 +1,7 @@
 const MagentoClient = require('./magento.client');
 const logger = require('../../config/logger');
 const config = require('../../config');
-const { buildProductPayload } = require('../../utils/helpers');
+const { buildProductPayload, sanitizeLogPayload } = require('../../utils/helpers');
 
 class TargetService extends MagentoClient {
   constructor(baseUrl, token, config = {}) {
@@ -22,15 +22,7 @@ class TargetService extends MagentoClient {
   async createProduct(productData) {
     logger.info('Creating product in target', { sku: productData.sku });
     const payload = buildProductPayload(productData);
-    // Log payload without base64 image data to avoid cluttering logs
-    const logPayload = JSON.parse(JSON.stringify(payload));
-    if (logPayload.product?.media_gallery_entries) {
-      logPayload.product.media_gallery_entries = logPayload.product.media_gallery_entries.map(entry => ({
-        ...entry,
-        content: entry.content ? { ...entry.content, base64_encoded_data: '[REDACTED]' } : entry.content
-      }));
-    }
-    logger.debug('Product payload being sent', { payload: JSON.stringify(logPayload, null, 2) });
+    logger.debug('Product payload being sent', { payload: sanitizeLogPayload(payload) });
     // Use /rest/all/V1/products to ensure global-scope attributes (weight, etc.) are saved
     // Store-scoped endpoints don't save global attributes properly (Magento bug)
     const response = await this.client.post('/rest/all/V1/products', payload);
