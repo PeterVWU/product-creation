@@ -212,7 +212,7 @@ class ProductUpdateService {
     // ── Step B: Store-view-scoped fields (per store view) ────────────────
 
     const storeWebsiteMapping = await targetService.getStoreWebsiteMapping();
-    const storeCodes = Object.keys(storeWebsiteMapping);
+    const storeCodes = Object.keys(storeWebsiteMapping).filter(code => code !== 'admin');
 
     const description = this.extractCustomAttribute(sourceProduct, 'description');
     const metaTitle = this.extractCustomAttribute(sourceProduct, 'meta_title');
