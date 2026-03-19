@@ -2,6 +2,7 @@ const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 const logger = require('../../config/logger');
 const { ShopifyAPIError } = require('../../utils/error-handler');
+const { sanitizeLogPayload } = require('../../utils/helpers');
 
 class ShopifyClient {
   constructor(shopDomain, accessToken, config = {}) {
@@ -62,7 +63,7 @@ class ShopifyClient {
         logger.info('Shopify API Request', {
           method: config.method?.toUpperCase(),
           url: fullUrl,
-          payload: config.data || null
+          payload: config.data ? sanitizeLogPayload(config.data) : null
         });
         return config;
       },
