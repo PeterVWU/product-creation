@@ -83,6 +83,33 @@ const buildProductPayload = (productData, options = {}) => {
   return payload;
 };
 
+const REDACTED_KEYS = new Set(['base64_encoded_data']);
+const MAX_STRING_LENGTH = 500;
+
+const sanitizeLogPayload = (obj, depth = 0) => {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (depth > 10) return '[nested too deep]';
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeLogPayload(item, depth + 1));
+  }
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (REDACTED_KEYS.has(key) && typeof value === 'string') {
+      sanitized[key] = '[BASE64_REDACTED]';
+    } else if (typeof value === 'string' && value.length > MAX_STRING_LENGTH) {
+      sanitized[key] = value.substring(0, MAX_STRING_LENGTH) + `... [truncated, ${value.length} chars total]`;
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeLogPayload(value, depth + 1);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
 const extractErrorMessage = (error) => {
   if (error.response && error.response.data) {
     if (error.response.data.message) {
@@ -101,5 +128,6 @@ module.exports = {
   chunkArray,
   sanitizeSku,
   buildProductPayload,
-  extractErrorMessage
+  extractErrorMessage,
+  sanitizeLogPayload
 };
