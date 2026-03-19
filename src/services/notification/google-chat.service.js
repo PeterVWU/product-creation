@@ -175,8 +175,9 @@ class GoogleChatService {
     } else if (errors && errors.length > 0) {
       const errorMessage = errors[errors.length - 1].message;
       widgets.push({
-        decoratedText: {
-          text: `<b>Error:</b> ${errorMessage}`
+        textParagraph: {
+          text: `<b>Error:</b> ${errorMessage}`,
+          maxLines: 5
         }
       });
     }
@@ -261,8 +262,9 @@ class GoogleChatService {
     if (!success && errors && errors.length > 0) {
       const errorMessage = errors[errors.length - 1].message;
       widgets.push({
-        decoratedText: {
-          text: `<b>Error:</b> ${errorMessage}`
+        textParagraph: {
+          text: `<b>Error:</b> ${errorMessage}`,
+          maxLines: 5
         }
       });
     }
@@ -316,18 +318,20 @@ class GoogleChatService {
     ];
 
     if (success) {
+      const childCount = summary.childrenMigrated ?? summary.variantsMigrated ?? 0;
       widgets.push({
         decoratedText: {
-          text: `<b>Children Migrated:</b> ${summary.childrenMigrated}`
+          text: `<b>Children Migrated:</b> ${childCount}`
         }
       });
     } else {
-      const errorMessage = errors.length > 0
+      const errorMessage = errors && errors.length > 0
         ? errors[errors.length - 1].message
         : 'Unknown error';
       widgets.push({
-        decoratedText: {
-          text: `<b>Error:</b> ${errorMessage}`
+        textParagraph: {
+          text: `<b>Error:</b> ${errorMessage}`,
+          maxLines: 5
         }
       });
     }
@@ -368,7 +372,7 @@ class GoogleChatService {
       widgets.push({
         buttonList: {
           buttons: [{
-            text: 'View Product in Shopify',
+            text: 'View Product Page',
             type: 'OUTLINED',
             onClick: {
               openLink: {

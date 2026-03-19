@@ -307,8 +307,10 @@ class ProductUpdateService {
   async updateProductFields(sku, options = {}) {
     const startTime = Date.now();
 
-    const targetMagentoStores = this.resolveMagentoTargetStores(options.targetMagentoStores);
-    const targetShopifyStores = this.resolveShopifyTargetStores(options.targetShopifyStores);
+    const includeMagento = options.includeMagento !== false;
+    const includeShopify = options.includeShopify !== false;
+    const targetMagentoStores = includeMagento ? this.resolveMagentoTargetStores(options.targetMagentoStores) : [];
+    const targetShopifyStores = includeShopify ? this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
     const allTargetStores = [
       ...targetMagentoStores,
       ...targetShopifyStores.map(s => `shopify:${s}`)
@@ -361,7 +363,6 @@ class ProductUpdateService {
 
     try {
       // Magento updates
-      const includeMagento = options.includeMagento !== false;
       if (includeMagento) {
         for (const storeName of targetMagentoStores) {
           try {
@@ -380,7 +381,6 @@ class ProductUpdateService {
       }
 
       // Shopify updates
-      const includeShopify = options.includeShopify !== false;
       if (includeShopify) {
         for (const storeName of targetShopifyStores) {
           try {

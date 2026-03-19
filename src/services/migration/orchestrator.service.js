@@ -779,7 +779,7 @@ class OrchestratorService {
       return {
         success: false,
         mode: 'error',
-        error: `Product ${sku} already exists on target ${storeName}. Update not yet supported.`,
+        error: `Product ${sku} already exists on target ${storeName}.`,
         storeResults: {}
       };
     }

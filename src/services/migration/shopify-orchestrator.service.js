@@ -63,8 +63,10 @@ class ShopifyOrchestratorService {
       success: false,
       targetPlatform: 'shopify',
       shopifyStore,
+      targetStores: [shopifyStore],
       shopifyProductId: null,
       shopifyProductUrl: null,
+      shopifyHandle: null,
       phases: {
         extraction: { success: false, duration: 0 },
         creation: { success: false, duration: 0 }
@@ -126,6 +128,7 @@ class ShopifyOrchestratorService {
             migrationContext.success = true;
             migrationContext.shopifyProductId = existingProduct.productId;
             migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(existingProduct.productId);
+            migrationContext.summary.variantsMigrated = 0;
             migrationContext.phases.creation.success = true;
             migrationContext.phases.creation.mode = 'no-action';
             migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
@@ -143,6 +146,7 @@ class ShopifyOrchestratorService {
           migrationContext.success = syncResult.success;
           migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
           migrationContext.summary.variantsMigrated = syncResult.variantsCreated || 0;
+          migrationContext.summary.childrenMigrated = syncResult.variantsCreated || 0;
           migrationContext.summary.imagesUploaded = syncResult.imagesUploaded || 0;
           migrationContext.summary.errorsCount = migrationContext.errors.length;
           migrationContext.summary.warningsCount = migrationContext.warnings.length;
@@ -154,10 +158,14 @@ class ShopifyOrchestratorService {
         const creationResult = await this.executeCreationPhase(extractedData, shopifyTargetService, migrationOptions, migrationContext);
 
         migrationContext.shopifyProductId = creationResult.parentProductId;
-        migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
+        migrationContext.shopifyHandle = creationResult.shopifyHandle;
+        migrationContext.shopifyProductUrl = creationResult.shopifyHandle
+          ? shopifyTargetService.buildStorefrontUrl(creationResult.shopifyHandle)
+          : shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
         migrationContext.success = true;
         migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
         migrationContext.summary.variantsMigrated = creationResult.createdVariants?.length || 0;
+        migrationContext.summary.childrenMigrated = creationResult.createdVariants?.length || 0;
         migrationContext.summary.imagesUploaded = creationResult.imagesUploaded || 0;
         migrationContext.summary.errorsCount = migrationContext.errors.length;
         migrationContext.summary.warningsCount = migrationContext.warnings.length;
@@ -428,7 +436,7 @@ class ShopifyOrchestratorService {
       migrationContext.errors.push({
         phase: 'creation',
         shopifyStore,
-        message: `Product ${sku} already exists on Shopify ${shopifyStore}. Update not yet supported.`
+        message: `Product ${sku} already exists on Shopify ${shopifyStore}.`
       });
 
       return { success: false };
@@ -438,7 +446,10 @@ class ShopifyOrchestratorService {
       const creationResult = await creationService.createStandaloneProduct(extractedData, shopifyStore);
 
       migrationContext.shopifyProductId = creationResult.parentProductId;
-      migrationContext.shopifyProductUrl = shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
+      migrationContext.shopifyHandle = creationResult.shopifyHandle;
+      migrationContext.shopifyProductUrl = creationResult.shopifyHandle
+        ? shopifyTargetService.buildStorefrontUrl(creationResult.shopifyHandle)
+        : shopifyTargetService.buildAdminUrl(creationResult.parentProductId);
       migrationContext.success = true;
 
       migrationContext.phases.creation.success = true;
@@ -448,6 +459,7 @@ class ShopifyOrchestratorService {
 
       migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
       migrationContext.summary.variantsMigrated = creationResult.createdVariants.length;
+      migrationContext.summary.childrenMigrated = creationResult.createdVariants.length;
       migrationContext.summary.imagesUploaded = creationResult.imagesUploaded || 0;
       migrationContext.summary.errorsCount = migrationContext.errors.length;
       migrationContext.summary.warningsCount = migrationContext.warnings.length;

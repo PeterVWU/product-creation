@@ -895,6 +895,10 @@ class ShopifyTargetService extends ShopifyClient {
     return `https://${this.shopDomain}/admin/products/${numericId}`;
   }
 
+  buildStorefrontUrl(handle) {
+    return `https://${this.shopDomain}/products/${handle}`;
+  }
+
   /**
    * Update product content fields using the productUpdate mutation.
    * Null values for optional fields (vendor, seoTitle, seoDescription) are omitted

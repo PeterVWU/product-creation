@@ -41,8 +41,10 @@ class PriceSyncService {
     };
 
     // Resolve target stores for notifications
-    const targetMagentoStores = this.resolveMagentoTargetStores(options.targetMagentoStores);
-    const targetShopifyStores = this.resolveShopifyTargetStores(options.targetShopifyStores);
+    const includeMagento = options.includeMagento !== false;
+    const includeShopify = options.includeShopify !== false;
+    const targetMagentoStores = includeMagento ? this.resolveMagentoTargetStores(options.targetMagentoStores) : [];
+    const targetShopifyStores = includeShopify ? this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
     const allTargetStores = [...targetMagentoStores, ...targetShopifyStores.map(s => `shopify:${s}`)];
 
     try {
@@ -63,7 +65,6 @@ class PriceSyncService {
       );
 
       // Step 2: Update Magento prices if enabled
-      const includeMagento = options.includeMagento !== false;
       if (includeMagento) {
         const magentoResult = await this.updateMagentoPrices(priceData, options);
         result.results.magento = magentoResult.storeResults;
@@ -77,7 +78,6 @@ class PriceSyncService {
       }
 
       // Step 3: Update Shopify prices if enabled
-      const includeShopify = options.includeShopify !== false;
       if (includeShopify && Object.keys(this.shopifyStores).length > 0) {
         const shopifyResult = await this.updateShopifyPrices(priceData, options);
         result.results.shopify = shopifyResult.storeResults;
