@@ -245,14 +245,12 @@ describe('OrchestratorService — AI content generation', () => {
     });
 
     it('should skip AI generation when storePrompts is not provided', async () => {
-      await orchestrator.migrateProduct('CONFIG-001', {
+      const result = await orchestrator.migrateProduct('CONFIG-001', {
         targetMagentoStores: ['ejuices']
       });
 
-      expect(mockContentGenInstance.generateForStores).toHaveBeenCalledWith(
-        mockExtractedData,
-        undefined
-      );
+      expect(mockContentGenInstance.generateForStores).not.toHaveBeenCalled();
+      expect(result.phases.aiGeneration).toBeUndefined();
     });
 
     it('should track aiGeneration phase in migration context', async () => {
@@ -323,6 +321,95 @@ describe('OrchestratorService — AI content generation', () => {
 
       expect(result.instanceResults.ejuices.aiContentApplied).toBe(true);
       expect(result.instanceResults.misthub.aiContentApplied).toBe(false);
+    });
+  });
+
+  describe('applyGeneratedContent', () => {
+    it('should add description attribute when none exists on parent', () => {
+      const data = {
+        parent: {
+          sku: 'TEST',
+          name: 'Original',
+          custom_attributes: [
+            { attribute_code: 'meta_title', value: 'Meta' }
+          ]
+        },
+        children: [],
+        images: { parent: [], children: {} }
+      };
+
+      const result = orchestrator.applyGeneratedContent(data, {
+        title: 'New Title',
+        description: '<div>New</div>'
+      });
+
+      expect(result.parent.name).toBe('New Title');
+      const descAttr = result.parent.custom_attributes
+        .find(a => a.attribute_code === 'description');
+      expect(descAttr).toBeDefined();
+      expect(descAttr.value).toBe('<div>New</div>');
+      // Original should still have no description
+      expect(data.parent.custom_attributes).toHaveLength(1);
+    });
+
+    it('should handle undefined custom_attributes', () => {
+      const data = {
+        parent: { sku: 'TEST', name: 'Original' },
+        children: []
+      };
+
+      const result = orchestrator.applyGeneratedContent(data, {
+        title: 'New Title',
+        description: '<div>New</div>'
+      });
+
+      expect(result.parent.name).toBe('New Title');
+      expect(result.parent.custom_attributes).toHaveLength(1);
+      expect(result.parent.custom_attributes[0]).toEqual({
+        attribute_code: 'description',
+        value: '<div>New</div>'
+      });
+    });
+
+    it('should not mutate original custom_attributes array', () => {
+      const originalAttrs = [
+        { attribute_code: 'description', value: 'old' },
+        { attribute_code: 'meta_title', value: 'meta' }
+      ];
+      const data = {
+        parent: { sku: 'TEST', name: 'Original', custom_attributes: originalAttrs },
+        children: []
+      };
+
+      const result = orchestrator.applyGeneratedContent(data, {
+        title: 'New',
+        description: '<div>New</div>'
+      });
+
+      // Cloned data has new description
+      expect(result.parent.custom_attributes.find(a => a.attribute_code === 'description').value)
+        .toBe('<div>New</div>');
+      // Original is untouched
+      expect(originalAttrs[0].value).toBe('old');
+      expect(data.parent.name).toBe('Original');
+    });
+
+    it('should share children and other properties by reference', () => {
+      const children = [{ sku: 'CHILD-1' }];
+      const images = { parent: [], children: {} };
+      const data = {
+        parent: { sku: 'TEST', name: 'Original', custom_attributes: [] },
+        children,
+        images
+      };
+
+      const result = orchestrator.applyGeneratedContent(data, {
+        title: 'New',
+        description: '<div>New</div>'
+      });
+
+      expect(result.children).toBe(children);
+      expect(result.images).toBe(images);
     });
   });
 });

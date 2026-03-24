@@ -92,11 +92,9 @@ class OrchestratorService {
         // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
         const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
-        const generatedContent = await this.executeAIGenerationPhase(
-          extractedData,
-          options.storePrompts,
-          migrationContext
-        );
+        const generatedContent = options.storePrompts
+          ? await this.executeAIGenerationPhase(extractedData, options.storePrompts, migrationContext)
+          : {};
 
         const childSkus = extractedData.children.map(child => child.sku);
         await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
@@ -135,11 +133,9 @@ class OrchestratorService {
         // ---- STANDALONE SIMPLE PATH ----
         const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
 
-        const generatedContent = await this.executeAIGenerationPhase(
-          extractedData,
-          options.storePrompts,
-          migrationContext
-        );
+        const generatedContent = options.storePrompts
+          ? await this.executeAIGenerationPhase(extractedData, options.storePrompts, migrationContext)
+          : {};
 
         const childSkus = extractedData.children.map(c => c.sku); // always []
         await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);

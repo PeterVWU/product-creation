@@ -35,7 +35,8 @@ router.post(
     body('options.storePrompts.*.prompt')
       .isString()
       .notEmpty()
-      .withMessage('Each storePrompts entry must have a non-empty prompt string'),
+      .isLength({ max: 2000 })
+      .withMessage('Each storePrompts entry must have a non-empty prompt string (max 2000 chars)'),
     body('options.storePrompts')
       .optional()
       .custom((storePrompts, { req }) => {
@@ -78,7 +79,8 @@ router.post(
     body('options.storePrompts.*.prompt')
       .isString()
       .notEmpty()
-      .withMessage('Each storePrompts entry must have a non-empty prompt string'),
+      .isLength({ max: 2000 })
+      .withMessage('Each storePrompts entry must have a non-empty prompt string (max 2000 chars)'),
     body('options.storePrompts')
       .optional()
       .custom((storePrompts, { req }) => {
