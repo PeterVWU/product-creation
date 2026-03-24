@@ -18,6 +18,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Price synchronization** - sync regular and special prices from source to target Magento stores and Shopify; supports both configurable and standalone simple products
 - **Product fields update** - push content fields (name, brand, categories, images, description, SEO) from source Magento to target Magento stores and Shopify in one call; supports both configurable and standalone simple products
 - **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
+- **Per-store AI content generation** - generate customized product titles and descriptions for each target store during migration using OpenAI, with per-store prompts tailored to different audiences
 
 ## Prerequisites
 
@@ -267,7 +268,12 @@ Migrate a single product from source Magento to one or more target Magento insta
     "createMissingAttributes": true,
     "overwriteExisting": false,
     "targetMagentoStores": ["ejuices", "misthub"],
-    "productEnabled": false
+    "productEnabled": false,
+    "storePrompts": {
+      "ejuices": {
+        "prompt": "Write for a premium retail audience. Emphasize flavor variety and device quality."
+      }
+    }
   }
 }
 ```
@@ -280,6 +286,7 @@ Migrate a single product from source Magento to one or more target Magento insta
   - `overwriteExisting` (boolean, default: false): Overwrite existing products
   - `targetMagentoStores` (array of strings): Names of target Magento instances to migrate to (e.g., `["ejuices", "misthub"]`). Required.
   - `productEnabled` (boolean, default: true): Whether to create products as enabled or disabled. Set to `false` to create products in disabled status
+  - `storePrompts` (object, optional): Per-store AI content generation prompts. Each key must match a store in `targetMagentoStores`. Each value is an object with a `prompt` field (non-empty string, max 2000 chars). Stores with prompts get AI-generated titles and descriptions; stores without prompts use the original source content. See [Per-Store AI Content Generation](#per-store-ai-content-generation) for details.
 
 **Response (Success - 200):**
 ```json
@@ -292,13 +299,15 @@ Migrate a single product from source Magento to one or more target Magento insta
       "success": true,
       "productId": 12345,
       "childrenCreated": 6,
-      "imagesUploaded": 12
+      "imagesUploaded": 12,
+      "aiContentApplied": true
     },
     "misthub": {
       "success": true,
       "productId": 12345,
       "childrenCreated": 6,
-      "imagesUploaded": 0
+      "imagesUploaded": 0,
+      "aiContentApplied": false
     }
   },
   "phases": {
@@ -306,6 +315,11 @@ Migrate a single product from source Magento to one or more target Magento insta
       "success": true,
       "duration": 2340,
       "childrenFound": 6
+    },
+    "aiGeneration": {
+      "success": true,
+      "duration": 8500,
+      "storesGenerated": 1
     },
     "preparation": {
       "success": true,
@@ -371,7 +385,7 @@ Migrate a single product from source Magento to one or more target Magento insta
 
 **POST** `/api/v1/migrate/products/batch`
 
-Migrate multiple configurable products sequentially.
+Migrate multiple configurable products sequentially. Supports `storePrompts` — the same prompts are applied to every SKU in the batch.
 
 **Request Body:**
 ```json
@@ -380,7 +394,12 @@ Migrate multiple configurable products sequentially.
   "options": {
     "includeImages": true,
     "createMissingAttributes": true,
-    "targetMagentoStores": ["ejuices", "misthub"]
+    "targetMagentoStores": ["ejuices", "misthub"],
+    "storePrompts": {
+      "ejuices": {
+        "prompt": "Write for a premium retail audience."
+      }
+    }
   }
 }
 ```
@@ -742,6 +761,76 @@ OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
 | `AI_GENERATION_FAILED` | 502 | OpenAI API call failed after retries |
 | `AI_RATE_LIMITED` | 429 | OpenAI rate limit exceeded |
 | `UPDATE_FAILED` | 502 | Failed to update product in Magento |
+
+## Per-Store AI Content Generation
+
+During migration, you can provide per-store prompts to generate customized product titles and descriptions for each target store using OpenAI. This is useful when different stores serve different audiences (e.g., wholesale vs. retail).
+
+### How It Works
+
+1. **Extraction** — product data is extracted from source Magento (as usual)
+2. **AI Generation** — for each store with a prompt in `storePrompts`, OpenAI generates a customized title and description based on the original product content and your prompt
+3. **Creation** — each store receives its customized content; stores without prompts get the original source content unchanged
+
+AI generation runs **before** any product creation. If any AI call fails, the entire migration aborts — no products are created on any store.
+
+### Usage
+
+Add `storePrompts` to the migration request options:
+
+```json
+{
+  "sku": "KUMI Oro 40K Puffs Disposable Vape",
+  "options": {
+    "targetMagentoStores": ["staging", "ejuices"],
+    "storePrompts": {
+      "staging": {
+        "prompt": "Write for a wholesale B2B audience. Use professional language focused on bulk pricing value and retailer benefits."
+      },
+      "ejuices": {
+        "prompt": "Write for a premium direct-to-consumer audience. Emphasize flavor experience and device quality."
+      }
+    }
+  }
+}
+```
+
+### Rules
+
+- `storePrompts` is optional. If omitted, migration works exactly as before.
+- Each key must match a store name in `targetMagentoStores`. Unknown store keys are a validation error.
+- Each entry must have a `prompt` field (non-empty string, max 2000 characters).
+- Only the parent product title and description are customized. Child variant names are unchanged.
+- Works for both configurable and standalone simple products.
+- Works with batch migrations — the same prompts apply to every SKU.
+- Only supported on Magento migration endpoints (not Shopify).
+
+### Response
+
+When `storePrompts` is used, the response includes:
+
+- `phases.aiGeneration` — `{ success, duration, storesGenerated }` tracking the AI generation phase
+- `instanceResults.<store>.aiContentApplied` — `true` for stores that received AI content, `false` for stores that used original content
+
+### Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/migrate/product \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "KUMI Oro 40K Puffs Disposable Vape",
+    "options": {
+      "targetMagentoStores": ["staging"],
+      "storePrompts": {
+        "staging": {
+          "prompt": "Write for a wholesale B2B audience. Emphasize bulk pricing value and device specs."
+        }
+      }
+    }
+  }'
+```
+
+---
 
 ## Migration Process
 
@@ -1353,6 +1442,7 @@ src/
 ### AI Services
 - **OpenAIClient**: OpenAI API client with retry logic for generating content
 - **DescriptionService**: Generate AI-powered product descriptions using product title and flavors
+- **ContentGenerationService**: Generate per-store customized titles and descriptions during migration using caller-provided prompts
 
 ### Notification Services
 - **GoogleChatService**: Send real-time notifications to Google Chat for migrations and price syncs
