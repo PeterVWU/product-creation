@@ -76,6 +76,38 @@ class ContentGenerationService {
       description: parsed.description
     };
   }
+
+  async generateForStores(extractedData, storePrompts) {
+    if (!storePrompts || Object.keys(storePrompts).length === 0) {
+      return {};
+    }
+
+    const originalTitle = extractedData.parent.name;
+    const descAttr = (extractedData.parent.custom_attributes || [])
+      .find(a => a.attribute_code === 'description');
+    const originalDescription = descAttr?.value || '';
+
+    const generatedContent = {};
+
+    for (const [storeName, storeConfig] of Object.entries(storePrompts)) {
+      logger.info('Generating AI content for store', { storeName, sku: extractedData.parent.sku });
+
+      const prompt = this.buildPrompt(storeConfig.prompt, originalTitle, originalDescription);
+      const response = await this.openaiClient.generateDescription(prompt);
+      const parsed = this.parseResponse(response);
+
+      generatedContent[storeName] = parsed;
+
+      logger.info('AI content generated for store', {
+        storeName,
+        sku: extractedData.parent.sku,
+        titleLength: parsed.title.length,
+        descriptionLength: parsed.description.length
+      });
+    }
+
+    return generatedContent;
+  }
 }
 
 module.exports = ContentGenerationService;
