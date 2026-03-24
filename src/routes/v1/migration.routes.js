@@ -24,6 +24,29 @@ router.post(
       .isString()
       .notEmpty()
       .withMessage('Each target store code must be a non-empty string'),
+    body('options.storePrompts')
+      .optional()
+      .isObject()
+      .withMessage('storePrompts must be an object'),
+    body('options.storePrompts.*')
+      .optional()
+      .isObject()
+      .withMessage('Each storePrompts entry must be an object'),
+    body('options.storePrompts.*.prompt')
+      .isString()
+      .notEmpty()
+      .withMessage('Each storePrompts entry must have a non-empty prompt string'),
+    body('options.storePrompts')
+      .optional()
+      .custom((storePrompts, { req }) => {
+        if (!storePrompts) return true;
+        const targetStores = req.body.options?.targetMagentoStores || req.body.options?.targetStores || [];
+        const invalidKeys = Object.keys(storePrompts).filter(key => !targetStores.includes(key));
+        if (invalidKeys.length > 0) {
+          throw new Error(`storePrompts contains stores not in targetMagentoStores: ${invalidKeys.join(', ')}`);
+        }
+        return true;
+      }),
     validateRequest
   ],
   asyncHandler(migrateProduct)
@@ -44,6 +67,29 @@ router.post(
       .isString()
       .notEmpty()
       .withMessage('Each target store code must be a non-empty string'),
+    body('options.storePrompts')
+      .optional()
+      .isObject()
+      .withMessage('storePrompts must be an object'),
+    body('options.storePrompts.*')
+      .optional()
+      .isObject()
+      .withMessage('Each storePrompts entry must be an object'),
+    body('options.storePrompts.*.prompt')
+      .isString()
+      .notEmpty()
+      .withMessage('Each storePrompts entry must have a non-empty prompt string'),
+    body('options.storePrompts')
+      .optional()
+      .custom((storePrompts, { req }) => {
+        if (!storePrompts) return true;
+        const targetStores = req.body.options?.targetMagentoStores || req.body.options?.targetStores || [];
+        const invalidKeys = Object.keys(storePrompts).filter(key => !targetStores.includes(key));
+        if (invalidKeys.length > 0) {
+          throw new Error(`storePrompts contains stores not in targetMagentoStores: ${invalidKeys.join(', ')}`);
+        }
+        return true;
+      }),
     validateRequest
   ],
   asyncHandler(migrateProductsBatch)
