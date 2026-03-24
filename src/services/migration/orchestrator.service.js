@@ -113,6 +113,7 @@ class OrchestratorService {
               migrationOptions,
               migrationContext
             );
+            instanceResult.aiContentApplied = !!generatedContent[storeName];
             migrationContext.instanceResults[storeName] = instanceResult;
           } catch (error) {
             logger.error('Migration to instance failed', { sku, storeName, error: error.message });
@@ -155,6 +156,7 @@ class OrchestratorService {
               storeName,
               migrationOptions
             );
+            instanceResult.aiContentApplied = !!generatedContent[storeName];
             migrationContext.instanceResults[storeName] = instanceResult;
 
             if (!instanceResult.success) {

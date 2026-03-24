@@ -270,6 +270,20 @@ describe('OrchestratorService — AI content generation', () => {
       expect(result.phases.aiGeneration.storesGenerated).toBe(1);
       expect(typeof result.phases.aiGeneration.duration).toBe('number');
     });
+
+    it('should set aiContentApplied flag in instance results', async () => {
+      mockContentGenInstance.generateForStores.mockResolvedValue({
+        ejuices: { title: 'AI Title', description: '<div>AI</div>' }
+      });
+
+      const result = await orchestrator.migrateProduct('CONFIG-001', {
+        targetMagentoStores: ['ejuices', 'misthub'],
+        storePrompts: { ejuices: { prompt: 'Go' } }
+      });
+
+      expect(result.instanceResults.ejuices.aiContentApplied).toBe(true);
+      expect(result.instanceResults.misthub.aiContentApplied).toBe(false);
+    });
   });
 
   describe('standalone product with storePrompts', () => {
@@ -295,6 +309,20 @@ describe('OrchestratorService — AI content generation', () => {
       const createCall = mockStandaloneCreationInstance.createProduct.mock.calls[0];
       const passedData = createCall[0];
       expect(passedData.parent.name).toBe('AI Simple Title');
+    });
+
+    it('should set aiContentApplied flag in standalone instance results', async () => {
+      mockContentGenInstance.generateForStores.mockResolvedValue({
+        ejuices: { title: 'AI Title', description: '<div>AI</div>' }
+      });
+
+      const result = await orchestrator.migrateProduct('SIMPLE-001', {
+        targetMagentoStores: ['ejuices', 'misthub'],
+        storePrompts: { ejuices: { prompt: 'Go' } }
+      });
+
+      expect(result.instanceResults.ejuices.aiContentApplied).toBe(true);
+      expect(result.instanceResults.misthub.aiContentApplied).toBe(false);
     });
   });
 });
