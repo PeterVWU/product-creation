@@ -10,6 +10,7 @@ const GoogleChatService = require('../notification/google-chat.service');
 const StandaloneExtractionService = require('./standalone-extraction.service');
 const StandaloneMagentoCreationService = require('./standalone-magento-creation.service');
 const { ExtractionError } = require('../../utils/error-handler');
+const ContentGenerationService = require('../ai/content-generation.service');
 
 class OrchestratorService {
   constructor() {
@@ -23,6 +24,7 @@ class OrchestratorService {
     this.extractionService = new ExtractionService(this.sourceService);
     this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
     this.googleChatService = new GoogleChatService();
+    this.contentGenerationService = new ContentGenerationService();
   }
 
   /**
@@ -90,14 +92,24 @@ class OrchestratorService {
         // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
         const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
+        const generatedContent = await this.executeAIGenerationPhase(
+          extractedData,
+          options.storePrompts,
+          migrationContext
+        );
+
         const childSkus = extractedData.children.map(child => child.sku);
         await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
         for (const storeName of targetMagentoStores) {
           try {
+            const storeExtractedData = generatedContent[storeName]
+              ? this.applyGeneratedContent(extractedData, generatedContent[storeName])
+              : extractedData;
+
             const instanceResult = await this.migrateToInstance(
               storeName,
-              extractedData,
+              storeExtractedData,
               migrationOptions,
               migrationContext
             );
@@ -122,14 +134,24 @@ class OrchestratorService {
         // ---- STANDALONE SIMPLE PATH ----
         const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
 
+        const generatedContent = await this.executeAIGenerationPhase(
+          extractedData,
+          options.storePrompts,
+          migrationContext
+        );
+
         const childSkus = extractedData.children.map(c => c.sku); // always []
         await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
         for (const storeName of targetMagentoStores) {
           try {
+            const storeExtractedData = generatedContent[storeName]
+              ? this.applyGeneratedContent(extractedData, generatedContent[storeName])
+              : extractedData;
+
             const instanceResult = await this.migrateStandaloneToInstance(
               sku,
-              extractedData,
+              storeExtractedData,
               storeName,
               migrationOptions
             );
@@ -803,6 +825,83 @@ class OrchestratorService {
       childrenCreated: 0,
       storeResults: creationResult.storeResults
     };
+  }
+
+  /**
+   * Create a copy of extractedData with AI-generated title and description
+   * applied to the parent. Does not mutate the original.
+   */
+  applyGeneratedContent(extractedData, content) {
+    const clonedCustomAttributes = (extractedData.parent.custom_attributes || [])
+      .map(attr => ({ ...attr }));
+
+    const descAttr = clonedCustomAttributes.find(a => a.attribute_code === 'description');
+    if (descAttr) {
+      descAttr.value = content.description;
+    } else {
+      clonedCustomAttributes.push({
+        attribute_code: 'description',
+        value: content.description
+      });
+    }
+
+    return {
+      ...extractedData,
+      parent: {
+        ...extractedData.parent,
+        name: content.title,
+        custom_attributes: clonedCustomAttributes
+      }
+    };
+  }
+
+  async executeAIGenerationPhase(extractedData, storePrompts, context) {
+    const phaseStartTime = Date.now();
+
+    try {
+      logger.info('Executing AI content generation phase', { sku: extractedData.parent.sku });
+
+      const generatedContent = await this.contentGenerationService.generateForStores(
+        extractedData,
+        storePrompts
+      );
+
+      const storesGenerated = Object.keys(generatedContent).length;
+
+      context.phases.aiGeneration = {
+        success: true,
+        duration: Date.now() - phaseStartTime,
+        storesGenerated
+      };
+
+      logger.info('AI content generation phase completed', {
+        sku: extractedData.parent.sku,
+        storesGenerated,
+        duration: `${context.phases.aiGeneration.duration}ms`
+      });
+
+      return generatedContent;
+    } catch (error) {
+      context.phases.aiGeneration = {
+        success: false,
+        duration: Date.now() - phaseStartTime,
+        storesGenerated: 0
+      };
+
+      context.errors.push({
+        phase: 'ai-generation',
+        message: error.message,
+        details: error.stack
+      });
+
+      logger.error('AI content generation phase failed', {
+        sku: extractedData.parent.sku,
+        error: error.message,
+        duration: `${context.phases.aiGeneration.duration}ms`
+      });
+
+      throw error;
+    }
   }
 
   async testConnections() {

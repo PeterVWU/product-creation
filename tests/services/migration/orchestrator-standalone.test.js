@@ -17,6 +17,7 @@ jest.mock('../../../src/services/migration/standalone-magento-creation.service')
 jest.mock('../../../src/services/migration/preparation.service');
 jest.mock('../../../src/services/category-mapping.service');
 jest.mock('../../../src/services/notification/google-chat.service');
+jest.mock('../../../src/services/ai/content-generation.service');
 
 const OrchestratorService = require('../../../src/services/migration/orchestrator.service');
 const SourceService = require('../../../src/services/magento/source.service');
@@ -25,6 +26,7 @@ const StandaloneExtractionService = require('../../../src/services/migration/sta
 const StandaloneMagentoCreationService = require('../../../src/services/migration/standalone-magento-creation.service');
 const PreparationService = require('../../../src/services/migration/preparation.service');
 const GoogleChatService = require('../../../src/services/notification/google-chat.service');
+const ContentGenerationService = require('../../../src/services/ai/content-generation.service');
 
 describe('OrchestratorService — standalone simple path', () => {
   let orchestrator;
@@ -92,6 +94,10 @@ describe('OrchestratorService — standalone simple path', () => {
       notifyMigrationEnd: jest.fn().mockResolvedValue({})
     };
     GoogleChatService.mockImplementation(() => mockGoogleChatInstance);
+
+    ContentGenerationService.mockImplementation(() => ({
+      generateForStores: jest.fn().mockResolvedValue({})
+    }));
 
     orchestrator = new OrchestratorService();
   });
