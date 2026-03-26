@@ -19,11 +19,17 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Product fields update** - push content fields (name, brand, categories, images, description, SEO) from source Magento to target Magento stores and Shopify in one call; supports both configurable and standalone simple products
 - **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
 - **Per-store AI content generation** - generate customized product titles and descriptions for each target store during migration using OpenAI, with per-store prompts tailored to different audiences
+- **PostgreSQL database** - persistent storage for AI prompts, audit logs, API keys, and role-based access control
+- **API key authentication** - secure API access with `mk_prefix_secret` format keys and bcrypt validation
+- **Role-based access control (RBAC)** - three built-in roles (admin, operator, viewer) with granular permissions
+- **Business-level audit logging** - queryable record of all migrations, syncs, and administrative actions
+- **Persistent AI prompts** - store per-store prompts in the database so frontends don't need to send them every time
 
 ## Prerequisites
 
 - Node.js 18+
 - npm or yarn
+- PostgreSQL 16+ (included via Docker Compose)
 - Access to both source and target Magento instances
 - Magento admin API tokens for both instances
 
@@ -68,7 +74,7 @@ MAGENTO_STORE_MISTHUB_TOKEN=your_misthub_token
 1. Configure environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your Magento credentials
+# Edit .env with your Magento credentials and DB_PASSWORD
 ```
 
 2. Create the logs directory with proper permissions:
@@ -76,17 +82,25 @@ cp .env.example .env
 mkdir -p logs && chmod 777 logs
 ```
 
-3. Build and start the container:
+3. Build and start the containers (API + PostgreSQL):
 ```bash
 docker-compose up -d
 ```
 
-4. Verify the container is running:
+PostgreSQL starts first with a health check. The API container waits for a healthy database before starting. On first boot, database migrations and role seeds run automatically.
+
+4. Verify the containers are running:
 ```bash
 docker-compose ps
 ```
 
-5. Check the health endpoint:
+5. Create your first admin API key:
+```bash
+npm run create-admin-key
+```
+Save the key — it's shown once and cannot be retrieved again.
+
+6. Check the health endpoint:
 ```bash
 curl http://localhost:3000/api/v1/health
 ```
@@ -134,13 +148,20 @@ Key environment variables:
 - `MAGENTO_STORE_<NAME>_TOKEN` - Target Magento instance API token (one per instance, e.g., `MAGENTO_STORE_EJUICES_TOKEN`)
 - `PORT` - Server port (default: 3000)
 - `LOG_LEVEL` - Logging level (default: info)
+- `DB_HOST` - PostgreSQL host (default: `postgres` in Docker, `localhost` for local dev)
+- `DB_PORT` - PostgreSQL port (default: 5432)
+- `DB_NAME` - Database name (default: `migration_api`)
+- `DB_USER` - Database user (default: `migration_user`)
+- `DB_PASSWORD` - Database password (required)
+- `AUTH_ENABLED` - Set to `true` to require API keys on all routes except health (default: `false`)
 
 ### Volumes
 
-The container mounts the `./logs` directory to persist log files outside the container:
+The container mounts the `./logs` directory to persist log files outside the container. PostgreSQL data is stored in a named Docker volume:
 ```yaml
 volumes:
-  - ./logs:/app/logs
+  - ./logs:/app/logs     # Log files
+  # pgdata volume is managed by Docker for PostgreSQL persistence
 ```
 
 ### Health Checks
@@ -829,6 +850,223 @@ curl -X POST http://localhost:3000/api/v1/migrate/product \
     }
   }'
 ```
+
+---
+
+## Authentication & Authorization
+
+The API supports optional API key authentication with role-based access control (RBAC). Controlled by the `AUTH_ENABLED` environment variable.
+
+### Setup
+
+1. Set `AUTH_ENABLED=true` in your `.env` file
+2. Create an admin API key:
+```bash
+npm run create-admin-key
+```
+3. Use the key in requests via the `X-API-Key` header:
+```bash
+curl -H "X-API-Key: mk_c86bc0d4_26cac6f6..." http://localhost:3000/api/v1/migrate/product
+```
+
+### API Key Format
+
+Keys use the format `mk_<prefix>_<secret>`:
+- `mk_` — fixed prefix identifying it as a migration API key
+- `<prefix>` — 8 hex characters, used for O(1) database lookup
+- `<secret>` — 64 hex characters, validated via bcrypt
+
+The raw key is shown once on creation and cannot be retrieved again. Only the bcrypt hash is stored.
+
+### Roles & Permissions
+
+| Role | Permissions | Use Case |
+|------|------------|----------|
+| **admin** | `*` (all) | Manage API keys, roles, prompts, run any operation |
+| **operator** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations |
+| **viewer** | `health:read`, `product:read`, `ai:prompts:read`, `audit:read` | Read-only access |
+
+### When Auth is Disabled
+
+When `AUTH_ENABLED=false` (default), all routes are accessible without an API key. The auth middleware sets `req.apiKey = null` and the permission middleware allows all requests through. Audit logs will have a null `api_key_id`.
+
+### API Key Management (Admin Only)
+
+**POST** `/api/v1/keys` — Create a new API key
+```bash
+curl -X POST http://localhost:3000/api/v1/keys \
+  -H "X-API-Key: mk_your_admin_key" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "frontend-app", "role": "operator"}'
+```
+Response includes the raw key (shown once):
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "name": "frontend-app",
+    "role": "operator",
+    "key": "mk_a1b2c3d4_longsecret..."
+  }
+}
+```
+
+**GET** `/api/v1/keys` — List all API keys (no secrets)
+
+**PATCH** `/api/v1/keys/:id` — Update key name, role, or active status
+
+**DELETE** `/api/v1/keys/:id` — Deactivate a key
+
+---
+
+## AI Prompt Management
+
+Store per-store AI prompts in the database so frontends don't need to send them with every migration request. Database prompts are used as a fallback when no `storePrompts` are provided in the request.
+
+### Priority Order
+
+During migration, prompts are resolved in this order:
+1. Request-provided `storePrompts` (highest priority)
+2. Active database prompt for the store
+3. No AI content generation
+
+### Endpoints
+
+**GET** `/api/v1/prompts` — List active prompts for all stores
+```bash
+curl http://localhost:3000/api/v1/prompts \
+  -H "X-API-Key: mk_your_key"
+```
+
+**GET** `/api/v1/prompts/:store` — Get active prompt for a specific store
+
+**GET** `/api/v1/prompts/:store/history` — Get version history for a store
+
+**POST** `/api/v1/prompts/:store` — Create a new prompt (deactivates the previous one)
+```bash
+curl -X POST http://localhost:3000/api/v1/prompts/ejuices \
+  -H "X-API-Key: mk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Write for a premium retail audience. Emphasize flavor variety."}'
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "store_name": "ejuices",
+    "prompt_text": "Write for a premium retail audience. Emphasize flavor variety.",
+    "version": 2,
+    "is_active": true,
+    "created_at": "2026-03-26T..."
+  }
+}
+```
+
+Each store has one active prompt. Creating a new prompt automatically deactivates the previous one (kept for version history).
+
+---
+
+## Audit Logging
+
+Business-level audit logging records all significant actions in the database. This runs alongside existing Winston file logging — Winston captures debug-level detail, the database provides queryable business records.
+
+### Logged Actions
+
+| Action | Resource Type | When |
+|--------|--------------|------|
+| `product:migrated` | product | Single product migration completes |
+| `product:batch_migrated` | product | Batch migration completes |
+| `product:migrated_shopify` | product | Shopify migration completes |
+| `product:prices_synced` | price | Price sync completes |
+| `product:fields_updated` | product | Product fields update completes |
+
+### Query Audit Logs
+
+**GET** `/api/v1/audit` — Query audit logs with filters
+
+```bash
+# All logs (last 50)
+curl "http://localhost:3000/api/v1/audit" \
+  -H "X-API-Key: mk_your_key"
+
+# Filter by action
+curl "http://localhost:3000/api/v1/audit?action=product:migrated" \
+  -H "X-API-Key: mk_your_key"
+
+# Filter by date range
+curl "http://localhost:3000/api/v1/audit?start_date=2026-03-01&end_date=2026-03-31" \
+  -H "X-API-Key: mk_your_key"
+
+# Pagination
+curl "http://localhost:3000/api/v1/audit?limit=20&offset=40" \
+  -H "X-API-Key: mk_your_key"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "api_key_id": "uuid",
+      "action": "product:migrated",
+      "resource_type": "product",
+      "resource_id": "TEST-SKU",
+      "metadata": {"targetStores": ["ejuices"], "success": true},
+      "status": "success",
+      "duration_ms": 15820,
+      "created_at": "2026-03-26T..."
+    }
+  ],
+  "total": 142,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+---
+
+## Database
+
+The API uses PostgreSQL for persistent storage. Database migrations run automatically on server startup.
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `roles` | RBAC role definitions with JSONB permissions |
+| `api_keys` | API key credentials (bcrypt hashed) |
+| `ai_prompts` | Per-store AI prompts with version history |
+| `audit_logs` | Business action audit trail |
+
+### Manual Migration Commands
+
+```bash
+# Run pending migrations
+npm run migrate
+
+# Rollback last migration batch
+npm run migrate:rollback
+
+# Run seeds (idempotent)
+npm run seed
+
+# Create admin API key
+npm run create-admin-key
+```
+
+### Rollout Strategy
+
+The database integration is designed for zero-downtime deployment:
+
+1. Deploy with `AUTH_ENABLED=false` — database starts, migrations run, roles seed
+2. Create admin API key via `npm run create-admin-key`
+3. Distribute API keys to consumers
+4. Set `AUTH_ENABLED=true` and redeploy
 
 ---
 
