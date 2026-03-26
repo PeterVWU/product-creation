@@ -2,12 +2,14 @@ const logger = require('../config/logger');
 const OrchestratorService = require('../services/migration/orchestrator.service');
 const ShopifyOrchestratorService = require('../services/migration/shopify-orchestrator.service');
 const { ValidationError } = require('../utils/error-handler');
+const auditService = require('../services/audit/audit.service');
 
 const orchestrator = new OrchestratorService();
 const shopifyOrchestrator = new ShopifyOrchestratorService();
 
 const migrateProduct = async (req, res, next) => {
   try {
+    const startTime = Date.now();
     const { sku, options = {} } = req.body;
 
     if (!sku) {
@@ -17,6 +19,16 @@ const migrateProduct = async (req, res, next) => {
     logger.info('Migration request received', { sku, options });
 
     const result = await orchestrator.migrateProduct(sku, options);
+
+    await auditService.logAction({
+      apiKeyId: req.apiKey?.id,
+      action: 'product:migrated',
+      resourceType: 'product',
+      resourceId: sku,
+      metadata: { targetStores: options.targetMagentoStores, success: result.success },
+      status: result.success ? 'success' : 'partial',
+      durationMs: Date.now() - startTime
+    });
 
     const statusCode = result.success ? 200 : 207;
 
@@ -28,6 +40,7 @@ const migrateProduct = async (req, res, next) => {
 
 const migrateProductsBatch = async (req, res, next) => {
   try {
+    const startTime = Date.now();
     const { skus, options = {} } = req.body;
 
     if (!skus || !Array.isArray(skus) || skus.length === 0) {
@@ -70,6 +83,16 @@ const migrateProductsBatch = async (req, res, next) => {
       duration: `${totalDuration}ms`
     });
 
+    await auditService.logAction({
+      apiKeyId: req.apiKey?.id,
+      action: 'product:batch_migrated',
+      resourceType: 'product',
+      resourceId: skus.join(','),
+      metadata: { total: skus.length, successCount, failureCount },
+      status: successCount === skus.length ? 'success' : 'partial',
+      durationMs: Date.now() - startTime
+    });
+
     res.status(200).json({
       success: successCount === skus.length,
       totalProducts: skus.length,
@@ -89,6 +112,7 @@ const migrateProductsBatch = async (req, res, next) => {
 
 const migrateProductToShopify = async (req, res, next) => {
   try {
+    const startTime = Date.now();
     const { sku, options = {} } = req.body;
 
     if (!sku) {
@@ -98,6 +122,16 @@ const migrateProductToShopify = async (req, res, next) => {
     logger.info('Shopify migration request received', { sku, options });
 
     const result = await shopifyOrchestrator.migrateProduct(sku, options);
+
+    await auditService.logAction({
+      apiKeyId: req.apiKey?.id,
+      action: 'product:migrated_shopify',
+      resourceType: 'product',
+      resourceId: sku,
+      metadata: { shopifyStore: options.shopifyStore, success: result.success },
+      status: result.success ? 'success' : 'partial',
+      durationMs: Date.now() - startTime
+    });
 
     const statusCode = result.success ? 200 : 207;
 

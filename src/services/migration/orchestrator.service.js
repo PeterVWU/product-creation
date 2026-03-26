@@ -11,6 +11,7 @@ const StandaloneExtractionService = require('./standalone-extraction.service');
 const StandaloneMagentoCreationService = require('./standalone-magento-creation.service');
 const { ExtractionError } = require('../../utils/error-handler');
 const ContentGenerationService = require('../ai/content-generation.service');
+const aiPromptRepo = require('../../database/repositories/ai-prompt.repository');
 
 class OrchestratorService {
   constructor() {
@@ -92,8 +93,23 @@ class OrchestratorService {
         // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
         const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
-        const generatedContent = options.storePrompts
-          ? await this.executeAIGenerationPhase(extractedData, options.storePrompts, migrationContext)
+        // Merge DB prompts with request prompts (request takes priority)
+        const requestPrompts = options.storePrompts || {};
+        const dbPrompts = {};
+
+        for (const storeName of targetMagentoStores) {
+          if (!requestPrompts[storeName]) {
+            const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
+            if (dbPrompt) {
+              dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
+            }
+          }
+        }
+
+        const mergedPrompts = { ...dbPrompts, ...requestPrompts };
+
+        const generatedContent = Object.keys(mergedPrompts).length > 0
+          ? await this.executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
           : {};
 
         const childSkus = extractedData.children.map(child => child.sku);
@@ -133,8 +149,23 @@ class OrchestratorService {
         // ---- STANDALONE SIMPLE PATH ----
         const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
 
-        const generatedContent = options.storePrompts
-          ? await this.executeAIGenerationPhase(extractedData, options.storePrompts, migrationContext)
+        // Merge DB prompts with request prompts (request takes priority)
+        const requestPrompts = options.storePrompts || {};
+        const dbPrompts = {};
+
+        for (const storeName of targetMagentoStores) {
+          if (!requestPrompts[storeName]) {
+            const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
+            if (dbPrompt) {
+              dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
+            }
+          }
+        }
+
+        const mergedPrompts = { ...dbPrompts, ...requestPrompts };
+
+        const generatedContent = Object.keys(mergedPrompts).length > 0
+          ? await this.executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
           : {};
 
         const childSkus = extractedData.children.map(c => c.sku); // always []

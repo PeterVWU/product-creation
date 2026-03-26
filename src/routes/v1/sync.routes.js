@@ -2,12 +2,15 @@ const express = require('express');
 const { body } = require('express-validator');
 const { validateRequest } = require('../../middleware/validation.middleware');
 const asyncHandler = require('../../utils/async-handler');
+const auth = require('../../middleware/auth.middleware');
+const permit = require('../../middleware/permission.middleware');
 const { syncPrices, updateProductFields } = require('../../controllers/sync.controller');
 
 const router = express.Router();
 
 router.post(
   '/prices',
+  auth(), permit('sync:prices'),
   [
     body('sku').notEmpty().withMessage('SKU is required').trim(),
     body('options').optional().isObject().withMessage('Options must be an object'),
@@ -44,6 +47,7 @@ router.post(
 
 router.post(
   '/product-fields',
+  auth(), permit('sync:product-fields'),
   [
     body('sku').notEmpty().withMessage('SKU is required').trim(),
     body('options').optional().isObject().withMessage('Options must be an object'),

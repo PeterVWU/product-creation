@@ -2,6 +2,8 @@ const express = require('express');
 const { body } = require('express-validator');
 const { validateRequest } = require('../../middleware/validation.middleware');
 const asyncHandler = require('../../utils/async-handler');
+const auth = require('../../middleware/auth.middleware');
+const permit = require('../../middleware/permission.middleware');
 const {
   migrateProduct,
   migrateProductsBatch,
@@ -12,6 +14,7 @@ const router = express.Router();
 
 router.post(
   '/product',
+  auth(), permit('migrate:product'),
   [
     body('sku').notEmpty().withMessage('SKU is required').trim(),
     body('options').optional().isObject().withMessage('Options must be an object'),
@@ -55,6 +58,7 @@ router.post(
 
 router.post(
   '/products/batch',
+  auth(), permit('migrate:batch'),
   [
     body('skus').isArray({ min: 1 }).withMessage('SKUs must be a non-empty array'),
     body('skus.*').notEmpty().withMessage('Each SKU must be a non-empty string').trim(),
@@ -99,6 +103,7 @@ router.post(
 
 router.post(
   '/product/shopify',
+  auth(), permit('migrate:shopify'),
   [
     body('sku').notEmpty().withMessage('SKU is required').trim(),
     body('options').optional().isObject().withMessage('Options must be an object'),
