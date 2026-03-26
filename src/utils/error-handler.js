@@ -74,6 +74,24 @@ class DescriptionGenerationError extends Error {
   }
 }
 
+class AuthenticationError extends Error {
+  constructor(message = 'Authentication required') {
+    super(message);
+    this.name = 'AuthenticationError';
+    this.statusCode = 401;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+class AuthorizationError extends Error {
+  constructor(message = 'Insufficient permissions') {
+    super(message);
+    this.name = 'AuthorizationError';
+    this.statusCode = 403;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
 module.exports = {
   MagentoAPIError,
   ExtractionError,
@@ -82,5 +100,7 @@ module.exports = {
   ValidationError,
   ImageProcessingError,
   ShopifyAPIError,
-  DescriptionGenerationError
+  DescriptionGenerationError,
+  AuthenticationError,
+  AuthorizationError
 };

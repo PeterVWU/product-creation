@@ -7,7 +7,9 @@ const {
   PreparationError,
   CreationError,
   ImageProcessingError,
-  DescriptionGenerationError
+  DescriptionGenerationError,
+  AuthenticationError,
+  AuthorizationError
 } = require('../utils/error-handler');
 
 const errorMiddleware = (err, req, res, next) => {
@@ -57,6 +59,22 @@ const errorMiddleware = (err, req, res, next) => {
         message: err.message
       },
       details: process.env.NODE_ENV === 'development' ? err.details : undefined
+    });
+  }
+
+  if (err instanceof AuthenticationError) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication Error',
+      message: err.message
+    });
+  }
+
+  if (err instanceof AuthorizationError) {
+    return res.status(403).json({
+      success: false,
+      error: 'Authorization Error',
+      message: err.message
     });
   }
 
