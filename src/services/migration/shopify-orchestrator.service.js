@@ -7,6 +7,8 @@ const ShopifyCreationService = require('./shopify-creation.service');
 const CategoryMappingService = require('../category-mapping.service');
 const GoogleChatService = require('../notification/google-chat.service');
 const StandaloneExtractionService = require('./standalone-extraction.service');
+const ContentGenerationService = require('../ai/content-generation.service');
+const aiPromptRepo = require('../../database/repositories/ai-prompt.repository');
 const { ExtractionError } = require('../../utils/error-handler');
 
 class ShopifyOrchestratorService {
@@ -22,6 +24,7 @@ class ShopifyOrchestratorService {
     this.extractionService = new ExtractionService(this.sourceService);
     this.googleChatService = new GoogleChatService();
     this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
+    this.contentGenerationService = new ContentGenerationService();
 
     // Store Shopify config for creating target services
     this.shopifyConfig = {
@@ -96,8 +99,18 @@ class ShopifyOrchestratorService {
       const productType = this.classifyProductType(sourceProduct);
 
       if (productType === 'configurable') {
-        // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
+        // ---- EXISTING CONFIGURABLE PATH ----
         const extractedData = await this.executeExtractionPhase(sku, migrationContext);
+
+        // AI content generation (DB prompts + request prompts)
+        const mergedPrompts = await this._resolvePrompts([shopifyStore], options.storePrompts);
+        const generatedContent = Object.keys(mergedPrompts).length > 0
+          ? await this._executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
+          : {};
+
+        if (generatedContent[shopifyStore]) {
+          this._applyGeneratedContent(extractedData, generatedContent[shopifyStore]);
+        }
 
         const childSkus = extractedData.children.map(child => child.sku);
         await this.googleChatService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
@@ -176,6 +189,17 @@ class ShopifyOrchestratorService {
       } else {
         // ---- STANDALONE SIMPLE PATH ----
         const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
+
+        // AI content generation (DB prompts + request prompts)
+        const mergedPrompts = await this._resolvePrompts([shopifyStore], options.storePrompts);
+        const generatedContent = Object.keys(mergedPrompts).length > 0
+          ? await this._executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
+          : {};
+
+        if (generatedContent[shopifyStore]) {
+          this._applyGeneratedContent(extractedData, generatedContent[shopifyStore]);
+        }
+
         await this.googleChatService.notifyMigrationStart(sku, [], [shopifyStore]);
 
         const storeResult = await this.migrateStandaloneToStore(sku, extractedData, shopifyStore, migrationOptions, migrationContext, migrationStartTime);
@@ -479,6 +503,78 @@ class ShopifyOrchestratorService {
       migrationContext.errors.push({ phase: 'creation', shopifyStore, message: error.message, details: error.stack });
 
       throw error;
+    }
+  }
+
+  async _resolvePrompts(targetStores, requestStorePrompts) {
+    const requestPrompts = requestStorePrompts || {};
+    const dbPrompts = {};
+
+    for (const storeName of targetStores) {
+      if (!requestPrompts[storeName]) {
+        const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
+        if (dbPrompt) {
+          dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
+        }
+      }
+    }
+
+    return { ...dbPrompts, ...requestPrompts };
+  }
+
+  async _executeAIGenerationPhase(extractedData, storePrompts, context) {
+    const phaseStartTime = Date.now();
+
+    try {
+      logger.info('Executing AI content generation phase', { sku: extractedData.parent.sku });
+
+      const generatedContent = await this.contentGenerationService.generateForStores(extractedData, storePrompts);
+
+      context.phases.aiGeneration = {
+        success: true,
+        duration: Date.now() - phaseStartTime,
+        storesGenerated: Object.keys(generatedContent).length
+      };
+
+      logger.info('AI content generation phase completed', {
+        sku: extractedData.parent.sku,
+        storesGenerated: Object.keys(generatedContent).length,
+        duration: `${context.phases.aiGeneration.duration}ms`
+      });
+
+      return generatedContent;
+    } catch (error) {
+      context.phases.aiGeneration = {
+        success: false,
+        duration: Date.now() - phaseStartTime
+      };
+
+      logger.error('AI content generation phase failed', {
+        sku: extractedData.parent.sku,
+        error: error.message,
+        duration: `${context.phases.aiGeneration.duration}ms`
+      });
+
+      throw error;
+    }
+  }
+
+  _applyGeneratedContent(extractedData, content) {
+    if (content.title) {
+      extractedData.parent.name = content.title;
+    }
+    if (content.description) {
+      const descAttr = (extractedData.parent.custom_attributes || [])
+        .find(a => a.attribute_code === 'description');
+      if (descAttr) {
+        descAttr.value = content.description;
+      } else {
+        extractedData.parent.custom_attributes = extractedData.parent.custom_attributes || [];
+        extractedData.parent.custom_attributes.push({
+          attribute_code: 'description',
+          value: content.description
+        });
+      }
     }
   }
 
