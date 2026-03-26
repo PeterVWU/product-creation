@@ -42,8 +42,9 @@ const startServer = async () => {
       process.exit(0);
     });
 
-    setTimeout(() => {
+    setTimeout(async () => {
       logger.error('Forced shutdown after timeout');
+      try { await db.destroy(); } catch (e) { /* ignore */ }
       process.exit(1);
     }, 10000);
   };

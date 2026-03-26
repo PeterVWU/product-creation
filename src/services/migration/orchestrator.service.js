@@ -93,20 +93,7 @@ class OrchestratorService {
         // ---- EXISTING CONFIGURABLE PATH (unchanged) ----
         const extractedData = await this.executeExtractionPhase(sku, migrationContext);
 
-        // Merge DB prompts with request prompts (request takes priority)
-        const requestPrompts = options.storePrompts || {};
-        const dbPrompts = {};
-
-        for (const storeName of targetMagentoStores) {
-          if (!requestPrompts[storeName]) {
-            const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
-            if (dbPrompt) {
-              dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
-            }
-          }
-        }
-
-        const mergedPrompts = { ...dbPrompts, ...requestPrompts };
+        const mergedPrompts = await this._resolvePrompts(targetMagentoStores, options.storePrompts);
 
         const generatedContent = Object.keys(mergedPrompts).length > 0
           ? await this.executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
@@ -149,20 +136,7 @@ class OrchestratorService {
         // ---- STANDALONE SIMPLE PATH ----
         const extractedData = await this.executeStandaloneExtractionPhase(sku, sourceProduct, migrationContext);
 
-        // Merge DB prompts with request prompts (request takes priority)
-        const requestPrompts = options.storePrompts || {};
-        const dbPrompts = {};
-
-        for (const storeName of targetMagentoStores) {
-          if (!requestPrompts[storeName]) {
-            const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
-            if (dbPrompt) {
-              dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
-            }
-          }
-        }
-
-        const mergedPrompts = { ...dbPrompts, ...requestPrompts };
+        const mergedPrompts = await this._resolvePrompts(targetMagentoStores, options.storePrompts);
 
         const generatedContent = Object.keys(mergedPrompts).length > 0
           ? await this.executeAIGenerationPhase(extractedData, mergedPrompts, migrationContext)
@@ -882,6 +856,22 @@ class OrchestratorService {
         custom_attributes: clonedCustomAttributes
       }
     };
+  }
+
+  async _resolvePrompts(targetStores, requestStorePrompts) {
+    const requestPrompts = requestStorePrompts || {};
+    const dbPrompts = {};
+
+    for (const storeName of targetStores) {
+      if (!requestPrompts[storeName]) {
+        const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
+        if (dbPrompt) {
+          dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
+        }
+      }
+    }
+
+    return { ...dbPrompts, ...requestPrompts };
   }
 
   async executeAIGenerationPhase(extractedData, storePrompts, context) {

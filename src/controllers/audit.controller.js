@@ -8,7 +8,7 @@ const queryAuditLogs = async (req, res, next) => {
       apiKeyId: api_key_id,
       startDate: start_date,
       endDate: end_date,
-      limit: limit ? parseInt(limit, 10) : 50,
+      limit: limit ? Math.min(parseInt(limit, 10), 1000) : 50,
       offset: offset ? parseInt(offset, 10) : 0
     });
     res.json({ success: true, ...results });

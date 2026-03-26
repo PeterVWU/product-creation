@@ -6,6 +6,7 @@ const { createKey, listKeys, updateKey, deactivateKey } = require('../../control
 
 const router = express.Router();
 
+// Only admin role has the '*' wildcard permission — this restricts key management to admins
 router.use(auth(), permit('*'));
 
 router.post('/', asyncHandler(createKey));
