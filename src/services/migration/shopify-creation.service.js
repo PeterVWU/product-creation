@@ -836,8 +836,11 @@ class ShopifyCreationService {
       }
 
       // Build minimal product data (no options)
+      const description = this.extractCustomAttribute(parent, 'description') ||
+                          this.extractCustomAttribute(parent, 'short_description') || '';
       const productData = {
         title: parent.name,
+        descriptionHtml: description,
         productType: productType || '',
         vendor: extractedData.translations?.brandLabel || ''
       };
