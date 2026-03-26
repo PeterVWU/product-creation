@@ -1,4 +1,24 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: migration-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: migration_api
+      POSTGRES_USER: migration_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U migration_user -d migration_api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - magento-network
+
   magento-migration-api:
     build:
       context: .
@@ -6,6 +26,9 @@ services:
     container_name: magento-migration-api
     image: magento-migration-api:latest
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3002:3000"
     environment:
@@ -40,7 +63,7 @@ services:
 
       # Error Handling
       - CONTINUE_ON_ERROR=true
-      
+
       # Google Chat Notifications
       - GOOGLE_CHAT_ENABLED=${GOOGLE_CHAT_ENABLED}
       - GOOGLE_CHAT_WEBHOOK_URL=${GOOGLE_CHAT_WEBHOOK_URL}
@@ -71,6 +94,14 @@ services:
       # Price Sync Configuration
       - PRICE_SYNC_STORE_GROUP_MAP=${PRICE_SYNC_STORE_GROUP_MAP}
 
+      # Database Configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=migration_api
+      - DB_USER=migration_user
+      - DB_PASSWORD=${DB_PASSWORD}
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
+
     volumes:
       # Persist logs outside container
       - ./logs:/app/logs
@@ -90,3 +121,6 @@ services:
 networks:
   magento-network:
     driver: bridge
+
+volumes:
+  pgdata:
