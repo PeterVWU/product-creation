@@ -8,7 +8,10 @@
     "dev": "nodemon src/server.js",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
-    "lint": "eslint src/**/*.js"
+    "lint": "eslint src/**/*.js",
+    "migrate": "knex migrate:latest --knexfile src/database/knexfile.js",
+    "migrate:rollback": "knex migrate:rollback --knexfile src/database/knexfile.js",
+    "seed": "knex seed:run --knexfile src/database/knexfile.js"
   },
   "keywords": [
     "magento",
