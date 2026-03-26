@@ -117,6 +117,18 @@ const config = {
     model: process.env.OPENAI_MODEL || 'gpt-4o'
   },
 
+  database: {
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT, 10) || 5432,
+    name: process.env.DB_NAME || 'migration_api',
+    user: process.env.DB_USER || 'migration_user',
+    password: process.env.DB_PASSWORD || ''
+  },
+
+  auth: {
+    enabled: process.env.AUTH_ENABLED === 'true'
+  },
+
   priceSync: {
     // Map store codes to customer group IDs for tier pricing
     // Parsed from PRICE_SYNC_STORE_GROUP_MAP=ejuicesco:2,wholesale:3 (comma-separated store:groupId pairs)
