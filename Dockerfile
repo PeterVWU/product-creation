@@ -23,6 +23,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy application source code
 COPY src ./src
 
+# Copy scripts
+COPY scripts ./scripts
+
 # Copy category mapping configuration
 COPY category-mapping.json ./
 
