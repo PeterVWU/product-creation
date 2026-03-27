@@ -24,6 +24,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Role-based access control (RBAC)** - three built-in roles (admin, operator, viewer) with granular permissions
 - **Business-level audit logging** - queryable record of all migrations, syncs, and administrative actions
 - **Persistent AI prompts** - store per-store prompts in the database so frontends don't need to send them every time
+- **Product deletion** - hard-delete products by SKU from any platform (source Magento, target Magento, or target Shopify) with configurable product cascade, deletion verification, and audit logging
 
 ## Prerequisites
 
@@ -783,6 +784,77 @@ OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
 | `AI_RATE_LIMITED` | 429 | OpenAI rate limit exceeded |
 | `UPDATE_FAILED` | 502 | Failed to update product in Magento |
 
+### Delete Product by SKU
+
+**DELETE** `/api/v1/products/:sku?platform=<platform>&storeName=<store>`
+
+Hard-delete a product by SKU from a specified platform. For configurable products (Magento) or multi-variant products (Shopify), the endpoint deletes all children/variants before deleting the parent. Deletion is verified by re-fetching the product after the delete call.
+
+**Permission required:** `product:delete`
+
+**Query Parameters:**
+- `platform` (required): One of `source-magento`, `target-magento`, `target-shopify`
+- `storeName` (required for target platforms): The configured store name (e.g., `ejuices`, `wholesale`)
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "sku": "TEST-ABC",
+    "platform": "target-magento",
+    "storeName": "ejuices",
+    "deletedSkus": ["CHILD-001", "CHILD-002", "TEST-ABC"]
+  }
+}
+```
+
+**Response (Not Found - 404):**
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Product not found: TEST-ABC"
+  }
+}
+```
+
+**Response (Partial Failure - 500):**
+```json
+{
+  "success": false,
+  "data": {
+    "success": false,
+    "sku": "TEST-ABC",
+    "platform": "target-magento",
+    "storeName": "ejuices",
+    "deletedSkus": ["CHILD-001"],
+    "failedSkus": ["CHILD-002"],
+    "error": "Child deletion failed for CHILD-002: API error"
+  }
+}
+```
+
+On partial failure (e.g., a child product fails to delete), the endpoint stops immediately and returns details of which SKUs were successfully deleted and which failed. Already-deleted children are not rolled back.
+
+**Example:**
+```bash
+# Delete a product from target Magento
+curl -X DELETE "http://localhost:3000/api/v1/products/TEST-ABC?platform=target-magento&storeName=ejuices" \
+  -H "X-API-Key: mk_your_key_here"
+
+# Delete a product from source Magento
+curl -X DELETE "http://localhost:3000/api/v1/products/TEST-ABC?platform=source-magento" \
+  -H "X-API-Key: mk_your_key_here"
+
+# Delete a product from Shopify
+curl -X DELETE "http://localhost:3000/api/v1/products/TEST-ABC?platform=target-shopify&storeName=wholesale" \
+  -H "X-API-Key: mk_your_key_here"
+```
+
+All delete operations (success, partial failure, and errors) are recorded in the audit log.
+
 ## Per-Store AI Content Generation
 
 During migration, you can provide per-store prompts to generate customized product titles and descriptions for each target store using OpenAI. This is useful when different stores serve different audiences (e.g., wholesale vs. retail).
@@ -883,7 +955,7 @@ The raw key is shown once on creation and cannot be retrieved again. Only the bc
 | Role | Permissions | Use Case |
 |------|------------|----------|
 | **admin** | `*` (all) | Manage API keys, roles, prompts, run any operation |
-| **operator** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations |
+| **operator** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `product:delete`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations |
 | **viewer** | `health:read`, `product:read`, `ai:prompts:read`, `audit:read` | Read-only access |
 
 ### When Auth is Disabled
@@ -1672,6 +1744,9 @@ src/
 - **OrchestratorService**: Coordinates Magento→Magento migration; auto-detects configurable vs standalone
 - **ShopifyOrchestratorService**: Coordinates Magento→Shopify migration; auto-detects configurable vs standalone
 - **ImageService**: Download and upload images
+
+### Deletion Services
+- **ProductDeletionService**: Orchestrate product deletion across platforms — resolves platform service, cascades child deletion, verifies removal, and logs to audit trail
 
 ### Sync Services
 - **PriceSyncService**: Synchronize prices from source to target platforms (Magento and Shopify)

@@ -35,3 +35,25 @@ describe('permission.middleware', () => {
     }));
   });
 });
+
+describe('permission.middleware — product:delete', () => {
+  test('product:delete permission grants access to DELETE endpoint', () => {
+    const { req, res, next } = mockReqRes({ permissions: ['product:delete'] });
+    permit('product:delete')(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  test('product:write does NOT grant delete access', () => {
+    const { req, res, next } = mockReqRes({ permissions: ['product:write'] });
+    permit('product:delete')(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'AuthorizationError'
+    }));
+  });
+
+  test('wildcard * grants delete access', () => {
+    const { req, res, next } = mockReqRes({ permissions: ['*'] });
+    permit('product:delete')(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+});

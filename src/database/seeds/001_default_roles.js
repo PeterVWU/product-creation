@@ -11,6 +11,7 @@ exports.seed = async function (knex) {
       permissions: JSON.stringify([
         'migrate:product', 'migrate:batch', 'migrate:shopify',
         'sync:prices', 'sync:product-fields',
+        'product:delete',
         'ai:prompts:read', 'ai:prompts:write',
         'audit:read'
       ])

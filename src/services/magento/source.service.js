@@ -12,6 +12,11 @@ class SourceService extends MagentoClient {
     return await this.get(`/rest/V1/products/${encodeURIComponent(sku)}`);
   }
 
+  async deleteProduct(sku) {
+    logger.info('Deleting product from source', { sku });
+    return await this.delete(`/rest/V1/products/${encodeURIComponent(sku)}`);
+  }
+
   async getConfigurableChildren(parentSku) {
     logger.debug('Fetching configurable children from source', { parentSku });
     try {

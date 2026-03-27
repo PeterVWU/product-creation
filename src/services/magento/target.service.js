@@ -84,6 +84,11 @@ class TargetService extends MagentoClient {
     return response.data;
   }
 
+  async deleteProduct(sku) {
+    logger.info('Deleting product from target', { sku });
+    return await this.delete(`/rest/V1/products/${encodeURIComponent(sku)}`);
+  }
+
   async getAttributeByCode(code) {
     logger.debug('Fetching attribute from target', { code });
     try {
