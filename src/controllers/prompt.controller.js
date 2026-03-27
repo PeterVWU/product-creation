@@ -36,8 +36,8 @@ const createPrompt = async (req, res, next) => {
   try {
     const { store } = req.params;
     const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'prompt is required in request body' });
+    if (prompt === undefined || prompt === null) {
+      return res.status(400).json({ success: false, error: 'prompt field is required in request body' });
     }
     const record = await aiPromptRepo.create({
       storeName: store,

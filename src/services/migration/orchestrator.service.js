@@ -865,7 +865,7 @@ class OrchestratorService {
     for (const storeName of targetStores) {
       if (!requestPrompts[storeName]) {
         const dbPrompt = await aiPromptRepo.findActiveByStore(storeName);
-        if (dbPrompt) {
+        if (dbPrompt && dbPrompt.prompt_text) {
           dbPrompts[storeName] = { prompt: dbPrompt.prompt_text };
         }
       }
