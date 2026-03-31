@@ -116,6 +116,99 @@ class SourceService extends MagentoClient {
     }
   }
 
+  async findParentProduct(sku) {
+    logger.info('Looking up parent product for variant', { sku });
+
+    // Step 1: Fetch the product by SKU
+    const product = await this.getProductBySku(sku);
+
+    // Step 2: Check if it's actually a variant (simple + visibility=1)
+    if (product.type_id === 'configurable') {
+      return {
+        isVariant: false,
+        message: 'Product is already a configurable (parent) product',
+        product: { sku: product.sku, name: product.name, type_id: product.type_id }
+      };
+    }
+
+    if (product.type_id === 'simple' && product.visibility !== 1) {
+      return {
+        isVariant: false,
+        message: 'Product is a standalone simple product (not a variant)',
+        product: { sku: product.sku, name: product.name, type_id: product.type_id, visibility: product.visibility }
+      };
+    }
+
+    // Step 3: It's a variant — search for parent by name
+    // Variant names follow patterns like:
+    //   "Parent Name - Option1 - Option2" (separator: " - ")
+    //   "Parent Name-Option" (separator: "-")
+    // Try progressively shorter name segments to find the parent
+    const nameSegments = product.name.split(/\s*-\s*/);
+    let parentResult = null;
+
+    // Try from longest to shortest base name (drop segments from the end)
+    for (let i = nameSegments.length - 1; i >= 1; i--) {
+      const baseName = nameSegments.slice(0, i).join('-').trim();
+      if (!baseName) continue;
+
+      logger.info('Searching for parent configurable product by name', { variantSku: sku, baseName, attempt: nameSegments.length - i });
+
+      const searchParams = this.buildSearchCriteria([
+        { field: 'name', value: `${baseName}%`, conditionType: 'like' },
+        { field: 'type_id', value: 'configurable', conditionType: 'eq' }
+      ]);
+
+      const searchResult = await this.get('/rest/V1/products', searchParams);
+      const candidates = searchResult.items || [];
+
+      if (candidates.length === 0) continue;
+
+      // Verify by checking each candidate's children for our variant SKU
+      for (const candidate of candidates) {
+        const children = await this.getConfigurableChildren(candidate.sku);
+        const isChild = children.some(child => child.sku === sku);
+
+        if (isChild) {
+          const adminUrl = `${this.baseUrl}/admin/catalog/product/edit/id/${candidate.id}`;
+          logger.info('Found parent product', { variantSku: sku, parentSku: candidate.sku });
+
+          return {
+            isVariant: true,
+            parentFound: true,
+            variant: { sku: product.sku, name: product.name },
+            parent: {
+              sku: candidate.sku,
+              name: candidate.name,
+              id: candidate.id,
+              adminUrl
+            }
+          };
+        }
+      }
+
+      // Keep track of last candidates for the response if no match found
+      parentResult = { baseName, candidates };
+    }
+
+    if (parentResult) {
+      return {
+        isVariant: true,
+        parentFound: false,
+        message: `Found configurable product(s) matching name but none contain variant ${sku}`,
+        variant: { sku: product.sku, name: product.name },
+        candidates: parentResult.candidates.map(c => ({ sku: c.sku, name: c.name }))
+      };
+    }
+
+    return {
+      isVariant: true,
+      parentFound: false,
+      message: `No configurable parent found matching name "${product.name}"`,
+      variant: { sku: product.sku, name: product.name }
+    };
+  }
+
   async downloadImage(imageUrl) {
     try {
       let fullUrl = imageUrl;

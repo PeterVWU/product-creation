@@ -1,7 +1,9 @@
 const logger = require('../config/logger');
 const DescriptionService = require('../services/description.service');
+const SourceService = require('../services/magento/source.service');
 const deletionService = require('../services/deletion/product-deletion.service');
 const auditService = require('../services/audit/audit.service');
+const config = require('../config');
 const { ValidationError } = require('../utils/error-handler');
 
 let descriptionService = null;
@@ -75,7 +77,31 @@ const deleteProduct = async (req, res, next) => {
   }
 };
 
+const findParentProduct = async (req, res, next) => {
+  try {
+    const { sku } = req.params;
+
+    logger.info('Find parent product request received', { sku });
+
+    const sourceService = new SourceService(
+      config.source.baseUrl,
+      config.source.token,
+      config.api
+    );
+
+    const result = await sourceService.findParentProduct(sku);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   generateDescription,
-  deleteProduct
+  deleteProduct,
+  findParentProduct
 };

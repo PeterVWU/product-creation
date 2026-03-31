@@ -4,7 +4,7 @@ const { validateRequest } = require('../../middleware/validation.middleware');
 const asyncHandler = require('../../utils/async-handler');
 const auth = require('../../middleware/auth.middleware');
 const permit = require('../../middleware/permission.middleware');
-const { generateDescription, deleteProduct } = require('../../controllers/product.controller');
+const { generateDescription, deleteProduct, findParentProduct } = require('../../controllers/product.controller');
 
 const router = express.Router();
 
@@ -28,6 +28,16 @@ router.delete(
     validateRequest
   ],
   asyncHandler(deleteProduct)
+);
+
+router.get(
+  '/:sku/parent',
+  auth(), permit('product:read'),
+  [
+    param('sku').notEmpty().withMessage('SKU is required').trim(),
+    validateRequest
+  ],
+  asyncHandler(findParentProduct)
 );
 
 module.exports = router;

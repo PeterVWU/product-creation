@@ -855,6 +855,74 @@ curl -X DELETE "http://localhost:3000/api/v1/products/TEST-ABC?platform=target-s
 
 All delete operations (success, partial failure, and errors) are recorded in the audit log.
 
+### Find Parent Product by Variant SKU
+
+**GET** `/api/v1/products/:sku/parent`
+
+Look up whether a product is a variant (simple product with visibility=1) on the source Magento instance, and if so, find its parent configurable product. The endpoint searches for the parent by matching the variant's name pattern against configurable products, then verifies the link by checking the parent's children.
+
+**Permission required:** `product:read`
+
+**Response (Variant with parent found - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "isVariant": true,
+    "parentFound": true,
+    "variant": {
+      "sku": "TEMPNOV6002",
+      "name": "SMOK NOVO 6 Pod Kit-Gold"
+    },
+    "parent": {
+      "sku": "Smok NOVO 6 Pod Kit",
+      "name": "SMOK NOVO 6 Pod Kit",
+      "id": 65302,
+      "adminUrl": "https://magento.example.com/admin/catalog/product/edit/id/65302"
+    }
+  }
+}
+```
+
+**Response (Not a variant - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "isVariant": false,
+    "message": "Product is a standalone simple product (not a variant)",
+    "product": {
+      "sku": "STANDALONE-SKU",
+      "name": "Some Product",
+      "type_id": "simple",
+      "visibility": 4
+    }
+  }
+}
+```
+
+**Response (Variant but no parent found - 200):**
+```json
+{
+  "success": true,
+  "data": {
+    "isVariant": true,
+    "parentFound": false,
+    "message": "No configurable parent found matching name \"Product Name\"",
+    "variant": {
+      "sku": "VARIANT-SKU",
+      "name": "Product Name-Option"
+    }
+  }
+}
+```
+
+**Example:**
+```bash
+curl -s "http://localhost:3000/api/v1/products/TEMPNOV6002/parent" \
+  -H "X-API-Key: mk_your_key_here"
+```
+
 ## Per-Store AI Content Generation
 
 During migration, you can provide per-store prompts to generate customized product titles and descriptions for each target store using OpenAI. This is useful when different stores serve different audiences (e.g., wholesale vs. retail).
