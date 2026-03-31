@@ -5,6 +5,7 @@ const axios = require('axios');
 class SourceService extends MagentoClient {
   constructor(baseUrl, token, config = {}) {
     super(baseUrl, token, config);
+    this.adminUrl = config.adminUrl || null;
   }
 
   async getProductBySku(sku) {
@@ -170,7 +171,9 @@ class SourceService extends MagentoClient {
         const isChild = children.some(child => child.sku === sku);
 
         if (isChild) {
-          const adminUrl = `${this.baseUrl}/admin/catalog/product/edit/id/${candidate.id}`;
+          const adminUrl = this.adminUrl
+            ? `${this.adminUrl}/catalog/product/edit/id/${candidate.id}`
+            : null;
           logger.info('Found parent product', { variantSku: sku, parentSku: candidate.sku });
 
           return {

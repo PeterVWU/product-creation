@@ -86,7 +86,7 @@ const findParentProduct = async (req, res, next) => {
     const sourceService = new SourceService(
       config.source.baseUrl,
       config.source.token,
-      config.api
+      { ...config.api, adminUrl: config.source.adminUrl }
     );
 
     const result = await sourceService.findParentProduct(sku);

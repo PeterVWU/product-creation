@@ -40,6 +40,7 @@ services:
       # Source Magento (replace with actual values or use .env file)
       - SOURCE_MAGENTO_BASE_URL=${SOURCE_MAGENTO_BASE_URL}
       - SOURCE_MAGENTO_TOKEN=${SOURCE_MAGENTO_TOKEN}
+      - SOURCE_MAGENTO_ADMIN_URL=${SOURCE_MAGENTO_ADMIN_URL}
 
       # Target Magento Stores
       - MAGENTO_STORE_EJUICES_URL=${MAGENTO_STORE_EJUICES_URL}

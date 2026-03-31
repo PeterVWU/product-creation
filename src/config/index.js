@@ -72,7 +72,8 @@ const config = {
 
   source: {
     baseUrl: process.env.SOURCE_MAGENTO_BASE_URL,
-    token: process.env.SOURCE_MAGENTO_TOKEN
+    token: process.env.SOURCE_MAGENTO_TOKEN,
+    adminUrl: process.env.SOURCE_MAGENTO_ADMIN_URL
   },
 
   magentoStores: parseMagentoStores(),
