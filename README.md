@@ -14,7 +14,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Multi-instance Magento support** - migrate products to multiple independent Magento instances in a single operation
 - **Shopify migration support** - migrate Magento products to Shopify stores using GraphQL Admin API
 - Health check endpoints
-- Real-time Google Chat notifications for migration and price sync status
+- Real-time notifications (Google Chat and Slack) for migration and price sync status
 - **Price synchronization** - sync regular and special prices from source to target Magento stores and Shopify; supports both configurable and standalone simple products
 - **Product fields update** - push content fields (name, brand, categories, images, description, SEO) from source Magento to target Magento stores and Shopify in one call; supports both configurable and standalone simple products
 - **AI-powered product descriptions** - generate SEO-optimized descriptions using OpenAI GPT-4o
@@ -95,10 +95,15 @@ PostgreSQL starts first with a health check. The API container waits for a healt
 docker-compose ps
 ```
 
-5. Create your first admin API key:
+5. Create your first API key:
 ```bash
-npm run create-admin-key
+# Admin key (full access)
+npm run create-admin-key -- "my-admin" admin
+
+# Operator key without delete permission
+npm run create-admin-key -- "my-operator" operator-readonly
 ```
+Available roles: `admin`, `operator`, `operator-readonly`, `viewer`. Defaults to `admin` if omitted.
 Save the key — it's shown once and cannot be retrieved again.
 
 6. Check the health endpoint:
@@ -1000,9 +1005,11 @@ The API supports optional API key authentication with role-based access control 
 ### Setup
 
 1. Set `AUTH_ENABLED=true` in your `.env` file
-2. Create an admin API key:
+2. Create an API key:
 ```bash
-npm run create-admin-key
+# Usage: npm run create-admin-key -- "<name>" <role>
+npm run create-admin-key -- "my-admin" admin
+npm run create-admin-key -- "my-operator" operator-readonly
 ```
 3. Use the key in requests via the `X-API-Key` header:
 ```bash
@@ -1023,7 +1030,8 @@ The raw key is shown once on creation and cannot be retrieved again. Only the bc
 | Role | Permissions | Use Case |
 |------|------------|----------|
 | **admin** | `*` (all) | Manage API keys, roles, prompts, run any operation |
-| **operator** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `product:delete`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations |
+| **operator** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `product:delete`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations (with delete) |
+| **operator-readonly** | `migrate:product`, `migrate:batch`, `migrate:shopify`, `sync:prices`, `sync:product-fields`, `product:read`, `ai:prompts:read`, `ai:prompts:write`, `audit:read` | Day-to-day operations (no delete) |
 | **viewer** | `health:read`, `product:read`, `ai:prompts:read`, `audit:read` | Read-only access |
 
 ### When Auth is Disabled
@@ -1653,9 +1661,9 @@ OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
 PRICE_SYNC_STORE_GROUP_MAP=ejuicesco:2  # Optional: map stores to customer group IDs for tier pricing
 ```
 
-## Google Chat Notifications
+## Notifications
 
-The API can send real-time notifications to Google Chat when migrations and price syncs start and complete.
+The API can send real-time notifications to Google Chat and/or Slack when migrations and price syncs start and complete. Both channels can be enabled independently — notifications are sent in parallel.
 
 ### Notification Types
 
@@ -1690,28 +1698,43 @@ The API can send real-time notifications to Google Chat when migrations and pric
 
 ### Setup
 
-1. **Create a Google Chat Webhook**
-   - Open Google Chat and go to the space where you want notifications
-   - Click the space name > Apps & integrations > Webhooks
-   - Click "Create webhook", give it a name, and copy the webhook URL
+#### Google Chat
 
-2. **Configure Environment Variables**
-
-Add to your `.env` file:
+1. Open Google Chat and go to the space where you want notifications
+2. Click the space name > Apps & integrations > Webhooks
+3. Click "Create webhook", give it a name, and copy the webhook URL
+4. Add to your `.env` file:
 ```env
-# Google Chat Notifications
 GOOGLE_CHAT_ENABLED=true
 GOOGLE_CHAT_WEBHOOK_URL=https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
 GOOGLE_CHAT_TIMEOUT=5000
+```
+
+#### Slack
+
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps)
+2. Add the `chat:write` Bot Token Scope under OAuth & Permissions
+3. Install the app to your workspace and copy the Bot User OAuth Token (`xoxb-...`)
+4. Invite the bot to your channel (or add `chat:write.public` scope for public channels)
+5. Add to your `.env` file:
+```env
+SLACK_ENABLED=true
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_CHANNEL_ID=C0YOUR_CHANNEL_ID
+SLACK_TIMEOUT=5000
 ```
 
 ### Configuration Options
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GOOGLE_CHAT_ENABLED` | Enable/disable notifications | `false` |
+| `GOOGLE_CHAT_ENABLED` | Enable/disable Google Chat notifications | `false` |
 | `GOOGLE_CHAT_WEBHOOK_URL` | Webhook URL from Google Chat | (required if enabled) |
 | `GOOGLE_CHAT_TIMEOUT` | Request timeout in milliseconds | `5000` |
+| `SLACK_ENABLED` | Enable/disable Slack notifications | `false` |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) | (required if enabled) |
+| `SLACK_CHANNEL_ID` | Slack channel ID to post to | (required if enabled) |
+| `SLACK_TIMEOUT` | Request timeout in milliseconds | `5000` |
 
 ## Error Handling
 
