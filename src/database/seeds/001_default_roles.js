@@ -17,6 +17,17 @@ exports.seed = async function (knex) {
       ])
     },
     {
+      id: 'operator-readonly',
+      description: 'Operations without delete — migrations, sync, prompt management',
+      permissions: JSON.stringify([
+        'migrate:product', 'migrate:batch', 'migrate:shopify',
+        'sync:prices', 'sync:product-fields',
+        'product:read',
+        'ai:prompts:read', 'ai:prompts:write',
+        'audit:read'
+      ])
+    },
+    {
       id: 'viewer',
       description: 'Read-only — health, product lookup, view prompts and audit',
       permissions: JSON.stringify([
