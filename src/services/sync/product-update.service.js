@@ -7,7 +7,7 @@ const TargetService = require('../magento/target.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
 const AttributeService = require('../attribute.service');
 const CategoryMappingService = require('../category-mapping.service');
-const GoogleChatService = require('../notification/google-chat.service');
+const NotificationService = require('../notification/notification.service');
 const { ExtractionError } = require('../../utils/error-handler');
 
 class ProductUpdateService {
@@ -20,7 +20,7 @@ class ProductUpdateService {
     this.attributeService = new AttributeService(this.sourceService);
     this.categoryMappingService = new CategoryMappingService();
     this.shopifyStores = config.shopify.stores;
-    this.googleChatService = new GoogleChatService();
+    this.notificationService = new NotificationService();
   }
 
   // ── Product type classification ──────────────────────────────────────────
@@ -359,7 +359,7 @@ class ProductUpdateService {
     logger.info('Extraction complete, starting store updates', { sku, productType, brandLabel });
 
     // Start notification (after successful extraction)
-    await this.googleChatService.notifyProductUpdateStart(sku, allTargetStores);
+    await this.notificationService.notifyProductUpdateStart(sku, allTargetStores);
 
     try {
       // Magento updates
@@ -401,7 +401,7 @@ class ProductUpdateService {
       if (result.errors.length > 0) result.success = false;
 
       const duration = Date.now() - startTime;
-      await this.googleChatService.notifyProductUpdateEnd({
+      await this.notificationService.notifyProductUpdateEnd({
         sku, success: result.success, errors: result.errors, targetStores: allTargetStores, duration
       });
 
@@ -412,7 +412,7 @@ class ProductUpdateService {
 
       const duration = Date.now() - startTime;
 
-      await this.googleChatService.notifyProductUpdateEnd({
+      await this.notificationService.notifyProductUpdateEnd({
         sku, success: false, errors: result.errors, targetStores: allTargetStores, duration
       });
 

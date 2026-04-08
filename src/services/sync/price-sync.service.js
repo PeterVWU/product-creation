@@ -3,7 +3,7 @@ const config = require('../../config');
 const SourceService = require('../magento/source.service');
 const TargetService = require('../magento/target.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
-const GoogleChatService = require('../notification/google-chat.service');
+const NotificationService = require('../notification/notification.service');
 
 class PriceSyncService {
   constructor() {
@@ -14,7 +14,7 @@ class PriceSyncService {
     );
 
     this.shopifyStores = config.shopify.stores;
-    this.googleChatService = new GoogleChatService();
+    this.notificationService = new NotificationService();
   }
 
   /**
@@ -58,7 +58,7 @@ class PriceSyncService {
       });
 
       // Send start notification
-      await this.googleChatService.notifyPriceSyncStart(
+      await this.notificationService.notifyPriceSyncStart(
         sku,
         priceData.children.length,
         allTargetStores
@@ -103,7 +103,7 @@ class PriceSyncService {
       });
 
       // Send end notification
-      await this.googleChatService.notifyPriceSyncEnd({
+      await this.notificationService.notifyPriceSyncEnd({
         sku,
         success: result.success,
         variantCount: result.variantCount,
@@ -130,7 +130,7 @@ class PriceSyncService {
       });
 
       // Send failure notification
-      await this.googleChatService.notifyPriceSyncEnd({
+      await this.notificationService.notifyPriceSyncEnd({
         sku,
         success: false,
         variantCount: 0,

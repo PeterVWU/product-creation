@@ -104,6 +104,12 @@ const config = {
       enabled: process.env.GOOGLE_CHAT_ENABLED === 'true',
       webhookUrl: process.env.GOOGLE_CHAT_WEBHOOK_URL,
       timeout: parseInt(process.env.GOOGLE_CHAT_TIMEOUT, 10) || 5000
+    },
+    slack: {
+      enabled: process.env.SLACK_ENABLED === 'true',
+      token: process.env.SLACK_BOT_TOKEN,
+      channel: process.env.SLACK_CHANNEL_ID,
+      timeout: parseInt(process.env.SLACK_TIMEOUT, 10) || 5000
     }
   },
 

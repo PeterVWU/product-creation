@@ -6,7 +6,7 @@ const ExtractionService = require('./extraction.service');
 const PreparationService = require('./preparation.service');
 const CreationService = require('./creation.service');
 const CategoryMappingService = require('../category-mapping.service');
-const GoogleChatService = require('../notification/google-chat.service');
+const NotificationService = require('../notification/notification.service');
 const StandaloneExtractionService = require('./standalone-extraction.service');
 const StandaloneMagentoCreationService = require('./standalone-magento-creation.service');
 const { ExtractionError } = require('../../utils/error-handler');
@@ -24,7 +24,7 @@ class OrchestratorService {
     this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
     this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
-    this.googleChatService = new GoogleChatService();
+    this.notificationService = new NotificationService();
     this.contentGenerationService = new ContentGenerationService();
   }
 
@@ -100,7 +100,7 @@ class OrchestratorService {
           : {};
 
         const childSkus = extractedData.children.map(child => child.sku);
-        await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
+        await this.notificationService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
         for (const storeName of targetMagentoStores) {
           try {
@@ -143,7 +143,7 @@ class OrchestratorService {
           : {};
 
         const childSkus = extractedData.children.map(c => c.sku); // always []
-        await this.googleChatService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
+        await this.notificationService.notifyMigrationStart(sku, childSkus, targetMagentoStores);
 
         for (const storeName of targetMagentoStores) {
           try {
@@ -212,7 +212,7 @@ class OrchestratorService {
         instancesFailed: migrationContext.summary.instancesFailed
       });
 
-      await this.googleChatService.notifyMigrationEnd(migrationContext);
+      await this.notificationService.notifyMigrationEnd(migrationContext);
 
       return migrationContext;
     } catch (error) {
@@ -233,7 +233,7 @@ class OrchestratorService {
         duration: `${migrationContext.summary.totalDuration}ms`
       });
 
-      await this.googleChatService.notifyMigrationEnd(migrationContext);
+      await this.notificationService.notifyMigrationEnd(migrationContext);
 
       return migrationContext;
     }

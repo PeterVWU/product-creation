@@ -5,7 +5,7 @@ const ShopifyTargetService = require('../shopify/shopify-target.service');
 const ExtractionService = require('./extraction.service');
 const ShopifyCreationService = require('./shopify-creation.service');
 const CategoryMappingService = require('../category-mapping.service');
-const GoogleChatService = require('../notification/google-chat.service');
+const NotificationService = require('../notification/notification.service');
 const StandaloneExtractionService = require('./standalone-extraction.service');
 const ContentGenerationService = require('../ai/content-generation.service');
 const aiPromptRepo = require('../../database/repositories/ai-prompt.repository');
@@ -22,7 +22,7 @@ class ShopifyOrchestratorService {
 
     this.categoryMappingService = new CategoryMappingService();
     this.extractionService = new ExtractionService(this.sourceService);
-    this.googleChatService = new GoogleChatService();
+    this.notificationService = new NotificationService();
     this.standaloneExtractionService = new StandaloneExtractionService(this.sourceService);
     this.contentGenerationService = new ContentGenerationService();
 
@@ -113,7 +113,7 @@ class ShopifyOrchestratorService {
         }
 
         const childSkus = extractedData.children.map(child => child.sku);
-        await this.googleChatService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
+        await this.notificationService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
 
         const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
         const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
@@ -146,7 +146,7 @@ class ShopifyOrchestratorService {
             migrationContext.phases.creation.mode = 'no-action';
             migrationContext.summary.totalDuration = Date.now() - migrationStartTime;
             migrationContext.summary.message = 'All variants already exist on Shopify';
-            await this.googleChatService.notifyMigrationEnd(migrationContext);
+            await this.notificationService.notifyMigrationEnd(migrationContext);
             return migrationContext;
           }
 
@@ -164,7 +164,7 @@ class ShopifyOrchestratorService {
           migrationContext.summary.errorsCount = migrationContext.errors.length;
           migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-          await this.googleChatService.notifyMigrationEnd(migrationContext);
+          await this.notificationService.notifyMigrationEnd(migrationContext);
           return migrationContext;
         }
 
@@ -183,7 +183,7 @@ class ShopifyOrchestratorService {
         migrationContext.summary.errorsCount = migrationContext.errors.length;
         migrationContext.summary.warningsCount = migrationContext.warnings.length;
 
-        await this.googleChatService.notifyMigrationEnd(migrationContext);
+        await this.notificationService.notifyMigrationEnd(migrationContext);
         return migrationContext;
 
       } else {
@@ -200,11 +200,11 @@ class ShopifyOrchestratorService {
           this._applyGeneratedContent(extractedData, generatedContent[shopifyStore]);
         }
 
-        await this.googleChatService.notifyMigrationStart(sku, [], [shopifyStore]);
+        await this.notificationService.notifyMigrationStart(sku, [], [shopifyStore]);
 
         const storeResult = await this.migrateStandaloneToStore(sku, extractedData, shopifyStore, migrationOptions, migrationContext, migrationStartTime);
 
-        await this.googleChatService.notifyMigrationEnd(migrationContext);
+        await this.notificationService.notifyMigrationEnd(migrationContext);
         return migrationContext;
       }
 
@@ -226,7 +226,7 @@ class ShopifyOrchestratorService {
         duration: `${migrationContext.summary.totalDuration}ms`
       });
 
-      await this.googleChatService.notifyMigrationEnd(migrationContext);
+      await this.notificationService.notifyMigrationEnd(migrationContext);
       return migrationContext;
     }
   }
