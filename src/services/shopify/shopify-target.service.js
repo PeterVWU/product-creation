@@ -114,6 +114,12 @@ class ShopifyTargetService extends ShopifyClient {
       variants: variants
     };
 
+    if (productData.seo && (productData.seo.title || productData.seo.description)) {
+      input.seo = {};
+      if (productData.seo.title) input.seo.title = productData.seo.title;
+      if (productData.seo.description) input.seo.description = productData.seo.description;
+    }
+
     // Include files if provided (files should be pre-uploaded file IDs from uploadAndWaitForFiles)
     // The files array may contain null entries for failed uploads - filter them out
     const validFiles = files.filter(f => f !== null);
@@ -406,6 +412,11 @@ class ShopifyTargetService extends ShopifyClient {
           ... on MediaImage {
             id
             fileStatus
+            fileErrors {
+              code
+              details
+              message
+            }
             image {
               url
             }
@@ -413,6 +424,11 @@ class ShopifyTargetService extends ShopifyClient {
           ... on GenericFile {
             id
             fileStatus
+            fileErrors {
+              code
+              details
+              message
+            }
           }
         }
       }
@@ -434,7 +450,12 @@ class ShopifyTargetService extends ShopifyClient {
       }
 
       if (file.fileStatus === 'FAILED') {
-        throw new Error(`File processing failed for ${fileId}`);
+        const errors = file.fileErrors || [];
+        const reason = errors.length > 0
+          ? errors.map(e => `${e.code || 'UNKNOWN'}${e.details ? ` (${e.details})` : ''}: ${e.message || ''}`).join('; ')
+          : 'no error details returned by Shopify';
+        logger.error('Shopify file processing failed', { fileId, fileErrors: errors });
+        throw new Error(`File processing failed for ${fileId} — ${reason}`);
       }
 
       // Still PROCESSING or UPLOADED - wait and retry
@@ -639,6 +660,76 @@ class ShopifyTargetService extends ShopifyClient {
       return variants;
     } catch (error) {
       logger.error('Failed to fetch variants by SKUs', { error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Search collections by title query. Returns matches ordered by relevance.
+   * @param {string} queryString - Text to search for in collection titles
+   * @param {number} first - Max results to return (default 10)
+   * @returns {Array} Array of { id, title, handle }
+   */
+  async searchCollections(queryString, first = 10) {
+    logger.debug('Searching Shopify collections', { queryString });
+
+    const query = `
+      query searchCollections($query: String!, $first: Int!) {
+        collections(first: $first, query: $query) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const result = await this.query(query, { query: `title:*${queryString}*`, first });
+      const collections = result.data.collections?.edges?.map(e => e.node) || [];
+      logger.info('Collections search complete', { queryString, foundCount: collections.length });
+      return collections;
+    } catch (error) {
+      logger.error('Failed to search collections', { queryString, error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Search products by title. Returns matches ordered by relevance.
+   * @param {string} queryString - Text to search for in product titles
+   * @param {number} first - Max results to return (default 10)
+   * @returns {Array} Array of { id, title, handle, onlineStoreUrl, status }
+   */
+  async searchProductsByTitle(queryString, first = 10) {
+    logger.debug('Searching Shopify products by title', { queryString });
+
+    const query = `
+      query searchProducts($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
+          edges {
+            node {
+              id
+              title
+              handle
+              onlineStoreUrl
+              status
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const result = await this.query(query, { query: `title:*${queryString}*`, first });
+      const products = result.data.products?.edges?.map(e => e.node) || [];
+      logger.info('Product title search complete', { queryString, foundCount: products.length });
+      return products;
+    } catch (error) {
+      logger.error('Failed to search products by title', { queryString, error: error.message });
       return [];
     }
   }

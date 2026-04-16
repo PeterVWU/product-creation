@@ -132,3 +132,143 @@ describe('ShopifyCreationService.createStandaloneProduct', () => {
     expect(mockShopifyTargetService.uploadAndWaitForFiles).not.toHaveBeenCalled();
   });
 });
+
+describe('ShopifyCreationService.createStandaloneProduct — VaporDNA enrichment', () => {
+  let service;
+  let mockShopifyTargetService;
+  let mockCategoryMappingService;
+  let mockStoreDescriptionService;
+
+  const baseExtractedData = {
+    parent: {
+      sku: 'VDNA-001',
+      name: 'Geek Bar Pulse Disposable',
+      price: 19.99
+    },
+    images: { parent: [], children: {} },
+    categories: [{ id: 5, name: 'Disposables' }],
+    translations: {
+      attributes: {},
+      attributeValues: {},
+      customAttributes: {},
+      brandLabel: 'Geek Bar'
+    },
+    children: [],
+    childLinks: []
+  };
+
+  beforeEach(() => {
+    mockShopifyTargetService = {
+      uploadAndWaitForFiles: jest.fn().mockResolvedValue([]),
+      createProductWithVariants: jest.fn().mockResolvedValue({
+        id: 'gid://shopify/Product/900',
+        handle: 'geek-bar-pulse-disposable',
+        variants: {
+          edges: [{
+            node: {
+              id: 'gid://shopify/ProductVariant/901',
+              title: 'Default Title',
+              inventoryItem: { sku: 'VDNA-001' }
+            }
+          }]
+        }
+      }),
+      publishProduct: jest.fn().mockResolvedValue({}),
+      searchCollections: jest.fn().mockResolvedValue([
+        { id: 'gid://shopify/Collection/1', title: 'Geek Bar', handle: 'geek-bar', onlineStoreUrl: 'https://vapordna.com/collections/geek-bar' }
+      ]),
+      searchProductsByTitle: jest.fn().mockResolvedValue([])
+    };
+
+    mockCategoryMappingService = {
+      getShopifyProductType: jest.fn().mockReturnValue('Disposable Vapes')
+    };
+
+    mockStoreDescriptionService = {
+      generate: jest.fn().mockResolvedValue({
+        descriptionHtml: '<div><p>AI-generated description for VaporDNA.</p></div>',
+        keywords: 'vape,disposable,geek bar'
+      })
+    };
+
+    const ShopifyCreationService = require('../../../src/services/migration/shopify-creation.service');
+    service = new ShopifyCreationService(
+      {},
+      mockShopifyTargetService,
+      mockCategoryMappingService,
+      'vapordna',
+      mockStoreDescriptionService
+    );
+  });
+
+  it('looks up brand collection via Shopify API using brandLabel', async () => {
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    expect(mockShopifyTargetService.searchCollections).toHaveBeenCalledWith('Geek Bar', 5);
+  });
+
+  it('calls storeDescriptionService.generate with the resolved hyperlinks', async () => {
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    expect(mockStoreDescriptionService.generate).toHaveBeenCalledWith(
+      'vapordna',
+      expect.objectContaining({
+        title: 'Geek Bar Pulse Disposable',
+        brandCollectionUrl: 'https://vapordna.com/collections/geek-bar',
+        homepageUrl: 'https://vapordna.com/',
+        disposablesUrl: 'https://vapordna.com/collections/disposable-vapes',
+        partnerUrl: null
+      })
+    );
+  });
+
+  it('falls back to homepage when brand collection is not found', async () => {
+    mockShopifyTargetService.searchCollections.mockResolvedValueOnce([]);
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    const generateArgs = mockStoreDescriptionService.generate.mock.calls[0][1];
+    expect(generateArgs.brandCollectionUrl).toBe('https://vapordna.com/');
+  });
+
+  it('sets seo.title as "{title}" | Only $X.XX and seo.description truncated to ≤160 chars', async () => {
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    const [productData] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
+    expect(productData.seo.title).toBe('"Geek Bar Pulse Disposable" | Only $19.99');
+    expect(productData.seo.description.length).toBeLessThanOrEqual(160);
+    expect(productData.seo.description).toContain('AI-generated description for VaporDNA');
+  });
+
+  it('uses AI-generated descriptionHtml when available', async () => {
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    const [productData] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
+    expect(productData.descriptionHtml).toContain('AI-generated description for VaporDNA');
+  });
+
+  it('searches for kit partner when product title contains "Pod"', async () => {
+    const podData = {
+      ...baseExtractedData,
+      parent: { ...baseExtractedData.parent, name: 'Geek Bar Mate 60K Refill Pod' }
+    };
+    mockShopifyTargetService.searchProductsByTitle.mockResolvedValueOnce([
+      { id: 'gid://shopify/Product/500', title: 'Geek Bar Mate 60K Kit', handle: 'geek-bar-mate-60k-kit', onlineStoreUrl: 'https://vapordna.com/products/geek-bar-mate-60k-kit' }
+    ]);
+    await service.createStandaloneProduct(podData, 'vapordna');
+    expect(mockShopifyTargetService.searchProductsByTitle).toHaveBeenCalled();
+    const generateArgs = mockStoreDescriptionService.generate.mock.calls[0][1];
+    expect(generateArgs.partnerUrl).toBe('https://vapordna.com/products/geek-bar-mate-60k-kit');
+  });
+
+  it('skips partner link silently when no partner found', async () => {
+    const kitData = {
+      ...baseExtractedData,
+      parent: { ...baseExtractedData.parent, name: 'Acme Mystery Kit' }
+    };
+    mockShopifyTargetService.searchProductsByTitle.mockResolvedValueOnce([]);
+    await service.createStandaloneProduct(kitData, 'vapordna');
+    const generateArgs = mockStoreDescriptionService.generate.mock.calls[0][1];
+    expect(generateArgs.partnerUrl).toBeNull();
+  });
+
+  it('does not pass tags for VaporDNA products', async () => {
+    await service.createStandaloneProduct(baseExtractedData, 'vapordna');
+    const [productData] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
+    expect(productData.tags).toEqual([]);
+  });
+});

@@ -1,13 +1,31 @@
 const logger = require('../../config/logger');
 const config = require('../../config');
 const { CreationError } = require('../../utils/error-handler');
+const vapordnaFormatter = require('./formatters/vapordna.formatter');
+const StoreDescriptionService = require('./store-description.service');
+
+const VAPORDNA_STORE_KEY = 'vapordna';
+const VAPORDNA_HOMEPAGE = 'https://vapordna.com/';
+const VAPORDNA_DISPOSABLES = 'https://vapordna.com/collections/disposable-vapes';
 
 class ShopifyCreationService {
-  constructor(sourceService, shopifyTargetService, categoryMappingService = null, storeName = null) {
+  constructor(sourceService, shopifyTargetService, categoryMappingService = null, storeName = null, storeDescriptionService = null) {
     this.sourceService = sourceService;
     this.shopifyTargetService = shopifyTargetService;
     this.categoryMappingService = categoryMappingService;
     this.storeName = storeName;
+    this.storeDescriptionService = storeDescriptionService;
+  }
+
+  isVapordnaStore() {
+    return (this.storeName || '').toLowerCase() === VAPORDNA_STORE_KEY;
+  }
+
+  getStoreDescriptionService() {
+    if (!this.storeDescriptionService) {
+      this.storeDescriptionService = new StoreDescriptionService();
+    }
+    return this.storeDescriptionService;
   }
 
   async createProducts(extractedData, options = {}) {
@@ -37,6 +55,11 @@ class ShopifyCreationService {
       // Build product data
       const productData = this.buildShopifyProduct(parent, children, translations, options.productStatus, sourceCategoryNames);
 
+      // Store-specific enrichment (e.g., VaporDNA: AI description, SEO fields, tag stripping)
+      if (this.isVapordnaStore()) {
+        await this.applyVapordnaEnrichment(productData, parent, children, translations);
+      }
+
       // Build product options from configurable attributes
       const productOptions = this.buildProductOptionsForSet(parent, translations);
 
@@ -60,7 +83,12 @@ class ShopifyCreationService {
 
       // Build variants with option values and file associations
       const allowedOptionNames = productOptions.map(o => o.name);
-      const variants = this.buildVariantsForSet(children, translations, fileIds, skuToFileIndex, allowedOptionNames);
+      let variants = this.buildVariantsForSet(children, translations, fileIds, skuToFileIndex, allowedOptionNames);
+
+      // VaporDNA requires variants in alphabetical order by option values
+      if (this.isVapordnaStore()) {
+        variants = vapordnaFormatter.sortVariantsAlphabetically(variants);
+      }
 
       logger.info('Built Shopify product data', {
         title: productData.title,
@@ -809,6 +837,132 @@ class ShopifyCreationService {
     return sourceValue;
   }
   /**
+   * Collect unique flavor labels from children using translation tables.
+   */
+  extractFlavorLabels(children, translations) {
+    const attributes = translations?.attributes || {};
+    const values = translations?.attributeValues || {};
+    let flavorAttrId = null;
+    for (const [attrId, attrCode] of Object.entries(attributes)) {
+      if (attrCode === 'flavor') {
+        flavorAttrId = attrId;
+        break;
+      }
+    }
+    const labels = [];
+    for (const child of (children || [])) {
+      const attr = (child.custom_attributes || []).find(a => a.attribute_code === 'flavor');
+      if (!attr || !attr.value) continue;
+      let label = null;
+      if (flavorAttrId) {
+        const key = `${flavorAttrId}_${attr.value}`;
+        label = values[key]?.label || null;
+      }
+      if (label) labels.push(label);
+    }
+    return [...new Set(labels)].sort();
+  }
+
+  /**
+   * Resolve a brand collection URL on VaporDNA, falling back to the homepage
+   * if no matching collection is found.
+   */
+  async resolveVapordnaBrandCollectionUrl(brandLabel) {
+    if (!brandLabel) return VAPORDNA_HOMEPAGE;
+    try {
+      const collections = await this.shopifyTargetService.searchCollections(brandLabel, 5);
+      if (collections && collections.length > 0) {
+        const primary = collections[0];
+        if (primary.onlineStoreUrl) return primary.onlineStoreUrl;
+        if (primary.handle) return `${VAPORDNA_HOMEPAGE}collections/${primary.handle}`;
+      }
+    } catch (error) {
+      logger.warn('VaporDNA brand collection lookup failed', {
+        brand: brandLabel,
+        error: error.message
+      });
+    }
+    return VAPORDNA_HOMEPAGE;
+  }
+
+  /**
+   * Look up the paired kit/pod listing on VaporDNA. Returns URL or null.
+   */
+  async resolveVapordnaPartnerUrl(title) {
+    const kind = vapordnaFormatter.detectKitOrPod(title);
+    if (!kind) return null;
+    const searchTerm = vapordnaFormatter.derivePartnerSearchTitle(title, kind);
+    if (!searchTerm) return null;
+
+    const oppositeKind = kind === 'kit' ? 'pod' : 'kit';
+    try {
+      const products = await this.shopifyTargetService.searchProductsByTitle(searchTerm, 10);
+      const partner = (products || []).find(p => vapordnaFormatter.detectKitOrPod(p.title) === oppositeKind);
+      if (!partner) return null;
+      if (partner.onlineStoreUrl) return partner.onlineStoreUrl;
+      if (partner.handle) return `${VAPORDNA_HOMEPAGE}products/${partner.handle}`;
+    } catch (error) {
+      logger.warn('VaporDNA partner lookup failed', {
+        title,
+        kind,
+        error: error.message
+      });
+    }
+    return null;
+  }
+
+  /**
+   * Mutate productData in place to apply VaporDNA-specific rules:
+   * - Strip tags
+   * - Generate AI description with embedded hyperlinks (brand collection, homepage,
+   *   disposables, optional kit/pod partner)
+   * - Set seo.title + seo.description (≤160 char truncated plaintext)
+   */
+  async applyVapordnaEnrichment(productData, parent, children, translations) {
+    productData.tags = [];
+
+    const brand = translations?.brandLabel || '';
+    const brandCollectionUrl = await this.resolveVapordnaBrandCollectionUrl(brand);
+    const partnerUrl = await this.resolveVapordnaPartnerUrl(productData.title);
+    const flavors = this.extractFlavorLabels(children || [], translations || {});
+
+    let generated = null;
+    try {
+      generated = await this.getStoreDescriptionService().generate(VAPORDNA_STORE_KEY, {
+        title: productData.title,
+        flavors,
+        brandCollectionUrl,
+        homepageUrl: VAPORDNA_HOMEPAGE,
+        disposablesUrl: VAPORDNA_DISPOSABLES,
+        partnerUrl
+      });
+    } catch (error) {
+      logger.warn('VaporDNA AI description generation failed; keeping original description', {
+        sku: parent?.sku,
+        error: error.message
+      });
+    }
+
+    if (generated && generated.descriptionHtml) {
+      productData.descriptionHtml = generated.descriptionHtml;
+    }
+
+    productData.seo = {
+      title: vapordnaFormatter.buildMetaTitle(productData.title, parent.price),
+      description: vapordnaFormatter.buildMetaDescription(productData.descriptionHtml)
+    };
+
+    logger.info('Applied VaporDNA enrichment', {
+      sku: parent?.sku,
+      brandCollectionUrl,
+      partnerUrl,
+      flavorCount: flavors.length,
+      seoTitle: productData.seo.title,
+      seoDescriptionLength: productData.seo.description.length
+    });
+  }
+
+  /**
    * Create a standalone simple product on Shopify (no product options, single default variant).
    * @param {Object} extractedData - From StandaloneExtractionService
    * @param {string} storeName - For store-aware category mapping
@@ -844,6 +998,12 @@ class ShopifyCreationService {
         productType: productType || '',
         vendor: extractedData.translations?.brandLabel || ''
       };
+
+      // Store-specific enrichment (e.g., VaporDNA: AI description, SEO fields, tag stripping)
+      const effectiveStore = (storeName || this.storeName || '').toLowerCase();
+      if (effectiveStore === VAPORDNA_STORE_KEY) {
+        await this.applyVapordnaEnrichment(productData, parent, [], extractedData.translations || {});
+      }
 
       // Single variant with default "Title"/"Default Title" option
       const variants = [{
