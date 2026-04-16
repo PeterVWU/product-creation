@@ -25,6 +25,7 @@ A Node.js REST API server for migrating products from a source Magento instance 
 - **Business-level audit logging** - queryable record of all migrations, syncs, and administrative actions
 - **Persistent AI prompts** - store per-store prompts in the database so frontends don't need to send them every time
 - **Product deletion** - hard-delete products by SKU from any platform (source Magento, target Magento, or target Shopify) with configurable product cascade, deletion verification, and audit logging
+- **Per-store Shopify listing formatting** - store-specific export behavior (currently: **VaporDNA**) with store-tailored AI description prompts, brand-collection lookup, kit/pod quick-linking, SEO meta title/description, tag stripping, and alphabetically sorted variants
 
 ## Prerequisites
 
@@ -1455,6 +1456,48 @@ curl -X POST http://localhost:3000/api/v1/migrate/product/shopify \
   }'
 ```
 
+### VaporDNA Export Store
+
+VaporDNA has store-specific listing-format requirements. When `options.shopifyStore` is `"vapordna"` (case-insensitive), the Shopify migration automatically applies a VaporDNA-tailored export flow in addition to the standard migration.
+
+**Trigger:**
+```json
+{
+  "sku": "MAGENTO-SKU-123",
+  "options": { "shopifyStore": "vapordna", "includeImages": true }
+}
+```
+
+**What changes vs. the generic Shopify flow:**
+
+| Rule | Behavior |
+|------|----------|
+| Tags | Stripped (`tags: []`) |
+| Variant ordering | Sorted alphabetically by option value before creation |
+| Meta title | `"<product title>" \| Only $X.XX` using the Magento `price` field |
+| Meta description | Plaintext (HTML stripped) truncated to ≤160 chars on a word boundary |
+| Description body | AI-generated via `StoreDescriptionService` with a VaporDNA-specific prompt; embeds three inline hyperlinks (brand collection, VaporDNA homepage, disposables collection) and an optional kit/pod Quick Link |
+| Brand collection link | Resolved via Shopify `collections` search against the source `brandLabel`; falls back to `https://vapordna.com/` when no match is found |
+| Kit ↔ Pod Quick Link | Title heuristic detects `kit` or `pod/refill/cartridge`; looks up the paired listing via Shopify `products` search and injects the link into the prompt (silently skipped when no match) |
+
+**Per-store prompt system:**
+
+Prompts live at `src/services/migration/prompts/<store>.prompt.js` and are dispatched by `StoreDescriptionService`. The VaporDNA prompt targets the structure in `example_vapordna_listing_description.html` (inline links in opening `<p>`, `<h2>Flavors</h2>`, `<h2>Product Specs</h2>` with em-dash bullets). To add a new store later: drop in a `<store>.prompt.js` exporting `buildPrompt(context)` and register it in `STORE_PROMPTS`. Source Magento is never written back.
+
+**Required environment variables:**
+```env
+SHOPIFY_STORE_VAPORDNA_URL=vapordna.myshopify.com
+SHOPIFY_STORE_VAPORDNA_TOKEN=shpat_xxxxx
+OPENAI_API_KEY=sk-...
+```
+
+**Failure modes:**
+- `OPENAI_API_KEY` missing or OpenAI call fails — the enrichment logs a warning and falls back to the source description; the product still creates.
+- Brand-collection search fails or returns no match — falls back to `https://vapordna.com/`.
+- Kit/pod partner lookup fails or returns no match — Quick Link silently omitted.
+
+**Known issue — image uploads may fail with HTTP 403:** If the source Magento media host is behind Cloudflare with bot/WAF rules, Shopify's image fetcher can receive 403 Forbidden even when the URL is publicly reachable. Shopify's actual reason is now surfaced in the error message via `fileErrors`. See [Troubleshooting → Shopify Image Upload 403](#shopify-image-upload-403) below.
+
 ## Standalone Simple Product Migration
 
 The API automatically detects and handles standalone simple products — Magento products with `type_id=simple` and `visibility > 1` (visible in catalog/search, not a configurable child).
@@ -1784,6 +1827,23 @@ Existing Shopify product options: ["Color", "Size"]
 
 The variant will be created with only Color and Size values, dropping Material.
 
+### Shopify Image Upload 403
+
+If image uploads fail during a Shopify migration and the logs show:
+```
+Shopify file processing failed
+  fileErrors=[{"code":"UNKNOWN","details":"The file does not exist (Unsuccessful HTTP response code: 403, reason: Forbidden) - https://...","message":"Media processing failed"}]
+```
+
+Shopify's image fetcher was blocked by the source host (most commonly by Cloudflare bot/WAF rules targeting Shopify's IP ranges). Verify by curling the same URL with multiple user agents — if everything returns HTTP 200 to your requests but Shopify still gets 403, the block is IP-based.
+
+Options:
+1. **Proxy images through this API** (server-side fetch → `stagedUploadCreate` → binary POST → `fileCreate`). Self-contained; no coordination with the source-side Cloudflare admin. Recommended.
+2. **Whitelist Shopify fetcher IPs** on the source's Cloudflare zone. Requires ops access; Shopify rotates IPs.
+3. **Disable Cloudflare** for `/media/catalog/product/*`. Loses CF caching for product images.
+
+The `fileErrors` field is queried automatically by `checkFileStatus`, so error messages include Shopify's actual reason rather than a generic "File processing failed".
+
 ### Google Chat Notifications Not Working
 
 If notifications aren't appearing:
@@ -1847,6 +1907,7 @@ src/
 - **OpenAIClient**: OpenAI API client with retry logic for generating content
 - **DescriptionService**: Generate AI-powered product descriptions using product title and flavors
 - **ContentGenerationService**: Generate per-store customized titles and descriptions during migration using caller-provided prompts
+- **StoreDescriptionService**: Per-target-store product description generation for Shopify export (e.g., VaporDNA); selects a store-specific prompt module from `src/services/migration/prompts/` and returns HTML + SEO keywords
 
 ### Notification Services
 - **GoogleChatService**: Send real-time notifications to Google Chat for migrations and price syncs
