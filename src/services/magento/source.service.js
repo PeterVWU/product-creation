@@ -47,7 +47,11 @@ class SourceService extends MagentoClient {
   async getProductById(id) {
     logger.debug('Fetching product by ID from source', { id });
     try {
-      return await this.get(`/rest/V1/products/${id}`);
+      const params = this.buildSearchCriteria([
+        { field: 'entity_id', value: id, conditionType: 'eq' }
+      ]);
+      const result = await this.get('/rest/V1/products', params);
+      return result?.items?.[0] || null;
     } catch (error) {
       logger.warn('Failed to fetch product by ID', { id, error: error.message });
       return null;
