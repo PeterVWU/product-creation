@@ -1,4 +1,7 @@
 const ShopifyClient = require('./shopify.client');
+const axios = require('axios');
+const FormData = require('form-data');
+const path = require('path');
 const logger = require('../../config/logger');
 
 class ShopifyTargetService extends ShopifyClient {
@@ -178,17 +181,33 @@ class ShopifyTargetService extends ShopifyClient {
   }
 
   /**
-   * Create media on a product from external URLs.
+   * Create media on a product after downloading and staging source images.
    * Use this for variant sync to add images to an existing product.
    * @param {string} productId - The Shopify product ID
    * @param {Array} images - Array of {url, alt, sku} objects
-   * @returns {Array} Array of {id, sku} objects with product media IDs
+   * @param {Function} imageLoader - Loads a source URL and returns {buffer, contentType}
+   * @returns {Array} Array of successfully created {id, sku} media objects
    */
-  async createProductMedia(productId, images) {
-    logger.info('Creating product media from external URLs', {
+  async createProductMedia(productId, images, imageLoader) {
+    logger.info('Creating product media from staged uploads', {
       productId,
       imageCount: images.length
     });
+
+    const stagedImages = [];
+    for (const image of images) {
+      try {
+        const staged = await this.stageImage(image, imageLoader);
+        stagedImages.push({ ...image, stagedUrl: staged.resourceUrl });
+      } catch (error) {
+        logger.warn('Failed to stage product image, skipping', {
+          sku: image.sku,
+          error: error.message
+        });
+      }
+    }
+
+    if (stagedImages.length === 0) return [];
 
     const mutation = `
       mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
@@ -210,8 +229,8 @@ class ShopifyTargetService extends ShopifyClient {
       }
     `;
 
-    const mediaInputs = images.map(image => ({
-      originalSource: image.url,
+    const mediaInputs = stagedImages.map(image => ({
+      originalSource: image.stagedUrl,
       alt: image.alt || '',
       mediaContentType: 'IMAGE'
     }));
@@ -233,7 +252,7 @@ class ShopifyTargetService extends ShopifyClient {
     const createdMedia = result.data.productCreateMedia.media || [];
     const mediaWithSkus = createdMedia.map((media, index) => ({
       id: media.id,
-      sku: images[index]?.sku || null
+      sku: stagedImages[index]?.sku || null
     }));
 
     logger.info('Product media created', {
@@ -344,14 +363,13 @@ class ShopifyTargetService extends ShopifyClient {
   }
 
   /**
-   * Create a file in Shopify from an external URL.
-   * Step 1 of the 3-step image upload process.
-   * @param {string} imageUrl - External URL of the image
+   * Create a Shopify file from a previously staged resource URL.
+   * @param {string} resourceUrl - Shopify staged resource URL
    * @param {string} alt - Alt text for the image
    * @returns {Object} Created file with id and fileStatus
    */
-  async createFile(imageUrl, alt = '') {
-    logger.info('Creating file in Shopify from external URL', { imageUrl });
+  async createFile(resourceUrl, alt = '') {
+    logger.info('Creating Shopify file from staged upload');
 
     const mutation = `
       mutation fileCreate($files: [FileCreateInput!]!) {
@@ -376,7 +394,7 @@ class ShopifyTargetService extends ShopifyClient {
 
     const variables = {
       files: [{
-        originalSource: imageUrl,
+        originalSource: resourceUrl,
         alt: alt,
         contentType: 'IMAGE'
       }]
@@ -393,6 +411,97 @@ class ShopifyTargetService extends ShopifyClient {
     const file = result.data.fileCreate.files[0];
     logger.debug('File created', { fileId: file.id, status: file.fileStatus });
     return file;
+  }
+
+  normalizeImageMimeType(contentType, filename) {
+    const normalized = String(contentType || '').split(';')[0].trim().toLowerCase();
+    if (normalized.startsWith('image/')) return normalized;
+
+    const extensionTypes = {
+      '.gif': 'image/gif',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.avif': 'image/avif',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg'
+    };
+    return extensionTypes[path.extname(filename).toLowerCase()] || 'image/jpeg';
+  }
+
+  buildImageFilename(imageUrl, mimeType = 'image/jpeg') {
+    let filename = '';
+    try {
+      filename = path.basename(decodeURIComponent(new URL(imageUrl).pathname));
+    } catch (_error) {
+      filename = path.basename(String(imageUrl || ''));
+    }
+
+    filename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '');
+    if (filename) return filename.slice(-255);
+
+    const extensions = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif' };
+    return `image.${extensions[mimeType] || 'jpg'}`;
+  }
+
+  async createStagedUpload(filename, mimeType, fileSize) {
+    const mutation = `
+      mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets {
+            url
+            resourceUrl
+            parameters { name value }
+          }
+          userErrors { field message }
+        }
+      }
+    `;
+    const result = await this.query(mutation, {
+      input: [{
+        resource: 'PRODUCT_IMAGE',
+        filename,
+        mimeType,
+        httpMethod: 'POST',
+        fileSize: String(fileSize)
+      }]
+    });
+    const target = result.data.stagedUploadsCreate.stagedTargets?.[0];
+    if (!target?.url || !target?.resourceUrl) {
+      throw new Error('Shopify did not return a staged upload target');
+    }
+    return target;
+  }
+
+  async uploadToStagedTarget(target, buffer, filename, mimeType) {
+    const form = new FormData();
+    for (const parameter of (target.parameters || [])) {
+      form.append(parameter.name, parameter.value);
+    }
+    form.append('file', buffer, { filename, contentType: mimeType, knownLength: buffer.length });
+    await axios.post(target.url, form, {
+      headers: form.getHeaders(),
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: this.timeout
+    });
+  }
+
+  async stageImage(image, imageLoader) {
+    if (typeof imageLoader !== 'function') {
+      throw new Error('An image loader is required for Shopify staged uploads');
+    }
+    const loaded = await imageLoader(image.url);
+    const buffer = Buffer.isBuffer(loaded) ? loaded : loaded?.buffer;
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      throw new Error('Image loader returned no image bytes');
+    }
+
+    const initialFilename = this.buildImageFilename(image.url);
+    const mimeType = this.normalizeImageMimeType(loaded?.contentType, initialFilename);
+    const filename = this.buildImageFilename(image.url, mimeType);
+    const target = await this.createStagedUpload(filename, mimeType, buffer.length);
+    await this.uploadToStagedTarget(target, buffer, filename, mimeType);
+    return { resourceUrl: target.resourceUrl, filename, mimeType };
   }
 
   /**
@@ -466,20 +575,20 @@ class ShopifyTargetService extends ShopifyClient {
   }
 
   /**
-   * Upload images from external URLs and wait for them to be ready.
-   * Combines steps 1-2 of the 3-step image upload process.
+   * Download, stage, create, and wait for Shopify image files.
    * @param {Array} images - Array of {url, alt, sku} objects
+   * @param {Function} imageLoader - Loads a source URL and returns {buffer, contentType}
    * @returns {Array} Array of {id, alt, sku} objects with Shopify file IDs (null entries for failed uploads to preserve indices)
    */
-  async uploadAndWaitForFiles(images) {
+  async uploadAndWaitForFiles(images, imageLoader) {
     logger.info('Uploading images to Shopify CDN', { count: images.length });
 
     const fileIds = [];
 
     for (const image of images) {
       try {
-        // Step 1: Create file from external URL
-        const file = await this.createFile(image.url, image.alt);
+        const staged = await this.stageImage(image, imageLoader);
+        const file = await this.createFile(staged.resourceUrl, image.alt);
         logger.info('File created in Shopify', { fileId: file.id, status: file.fileStatus, sku: image.sku });
 
         // Step 2: Wait for file to be ready
@@ -492,7 +601,7 @@ class ShopifyTargetService extends ShopifyClient {
           sku: image.sku  // Preserve SKU for variant association
         });
       } catch (error) {
-        logger.error('Failed to upload image', { url: image.url, sku: image.sku, error: error.message });
+        logger.warn('Failed to upload image, skipping', { url: image.url, sku: image.sku, error: error.message });
         // Push null to preserve indices for SKU-to-file mapping
         fileIds.push(null);
       }
@@ -508,45 +617,9 @@ class ShopifyTargetService extends ShopifyClient {
    * The productCreateMedia mutation is deprecated by Shopify.
    * Images should be included in the productSet mutation via the files field.
    */
-  async uploadProductImages(productId, images) {
+  async uploadProductImages(productId, images, imageLoader) {
     logger.warn('uploadProductImages is deprecated - use files parameter in createProductWithVariants instead');
-    logger.info('Uploading product images to Shopify', {
-      productId,
-      imageCount: images.length
-    });
-
-    const mutation = `
-      mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-        productCreateMedia(productId: $productId, media: $media) {
-          media {
-            ... on MediaImage {
-              id
-              image {
-                url
-              }
-            }
-          }
-          mediaUserErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-
-    const mediaInputs = images.map(image => ({
-      originalSource: image.url,
-      alt: image.alt || '',
-      mediaContentType: 'IMAGE'
-    }));
-
-    const variables = {
-      productId,
-      media: mediaInputs
-    };
-
-    const result = await this.query(mutation, variables);
-    return result.data.productCreateMedia.media;
+    return this.createProductMedia(productId, images, imageLoader);
   }
 
   async getProductByHandle(handle) {

@@ -1522,7 +1522,7 @@ OPENAI_API_KEY=sk-...
 - Brand-collection search fails or returns no match — falls back to `https://vapordna.com/`.
 - Kit/pod partner lookup fails or returns no match — Quick Link silently omitted.
 
-**Known issue — image uploads may fail with HTTP 403:** If the source Magento media host is behind Cloudflare with bot/WAF rules, Shopify's image fetcher can receive 403 Forbidden even when the URL is publicly reachable. Shopify's actual reason is now surfaced in the error message via `fileErrors`. See [Troubleshooting → Shopify Image Upload 403](#shopify-image-upload-403) below.
+**Image uploads:** The API downloads Magento image bytes and sends them through Shopify's staged-upload flow. Shopify no longer fetches Magento media URLs directly, so source-side Cloudflare/WAF rules do not block Shopify image creation. See [Shopify staged image uploads](#shopify-staged-image-uploads).
 
 ## Standalone Simple Product Migration
 
@@ -1853,22 +1853,25 @@ Existing Shopify product options: ["Color", "Size"]
 
 The variant will be created with only Color and Size values, dropping Material.
 
-### Shopify Image Upload 403
+### Shopify Staged Image Uploads
 
-If image uploads fail during a Shopify migration and the logs show:
+Shopify image migrations use this sequence:
+
+1. The API downloads the image from Magento using the configured source credentials.
+2. The API requests a `PRODUCT_IMAGE` target with Shopify's `stagedUploadsCreate` mutation.
+3. The image bytes and Shopify-provided parameters are uploaded as multipart form data.
+4. The staged `resourceUrl` is passed to `fileCreate` for new products or `productCreateMedia` for existing products.
+5. The API waits for Shopify to report `READY`, then preserves the existing variant-image association by SKU.
+
+Uploads are sequential and best-effort. A failed image is logged and skipped without aborting product creation; null positions are retained internally so later variant images remain associated with the correct SKU. Upload summaries report successful images rather than the number requested.
+
+Signed staging URLs, upload parameters, and GraphQL `originalSource` values are redacted from application logs. No Cloudflare allowlist or WAF change is required for Magento media paths.
+
+For local testing, run `npm run dev` and use `http://localhost:3000`. If PostgreSQL is running through this repository's Docker Compose configuration while `.env` contains legacy database names, start the API with:
+
+```bash
+DB_NAME=migration_api DB_USER=migration_user npm run dev
 ```
-Shopify file processing failed
-  fileErrors=[{"code":"UNKNOWN","details":"The file does not exist (Unsuccessful HTTP response code: 403, reason: Forbidden) - https://...","message":"Media processing failed"}]
-```
-
-Shopify's image fetcher was blocked by the source host (most commonly by Cloudflare bot/WAF rules targeting Shopify's IP ranges). Verify by curling the same URL with multiple user agents — if everything returns HTTP 200 to your requests but Shopify still gets 403, the block is IP-based.
-
-Options:
-1. **Proxy images through this API** (server-side fetch → `stagedUploadCreate` → binary POST → `fileCreate`). Self-contained; no coordination with the source-side Cloudflare admin. Recommended.
-2. **Whitelist Shopify fetcher IPs** on the source's Cloudflare zone. Requires ops access; Shopify rotates IPs.
-3. **Disable Cloudflare** for `/media/catalog/product/*`. Loses CF caching for product images.
-
-The `fileErrors` field is queried automatically by `checkFileStatus`, so error messages include Shopify's actual reason rather than a generic "File processing failed".
 
 ### Google Chat Notifications Not Working
 

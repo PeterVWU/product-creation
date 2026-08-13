@@ -362,6 +362,16 @@ describe('ProductUpdateService', () => {
       );
     });
 
+    it('passes the Magento image downloader to Shopify media creation', async () => {
+      await service.updateShopifyStore('myshopify', extractedData);
+
+      expect(mockShopify.createProductMedia).toHaveBeenCalledWith(
+        'gid://shopify/Product/123',
+        expect.any(Array),
+        expect.any(Function)
+      );
+    });
+
     it('returns success: true even when image replace fails', async () => {
       mockShopify.deleteAllProductMedia.mockRejectedValue(new Error('cdn error'));
 

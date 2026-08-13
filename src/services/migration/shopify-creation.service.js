@@ -63,10 +63,8 @@ class ShopifyCreationService {
       // Build product options from configurable attributes
       const productOptions = this.buildProductOptionsForSet(parent, translations);
 
-      // Upload images first using the 3-step Shopify flow:
-      // 1. fileCreate - upload from external URL to Shopify CDN
-      // 2. Poll fileStatus until READY
-      // 3. Reference file IDs in productSet
+      // Download Magento images, stage their bytes with Shopify, create files,
+      // poll until READY, then reference their IDs in productSet.
       let fileIds = [];
       let skuToFileIndex = {};
 
@@ -76,8 +74,11 @@ class ShopifyCreationService {
 
         if (inputs.length > 0) {
           logger.info('Uploading images to Shopify CDN', { count: inputs.length });
-          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(inputs);
-          logger.info('Images uploaded and ready', { count: fileIds.length });
+          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(
+            inputs,
+            this.sourceService.downloadImage.bind(this.sourceService)
+          );
+          logger.info('Images uploaded and ready', { count: fileIds.filter(Boolean).length });
         }
       }
 
@@ -268,7 +269,8 @@ class ShopifyCreationService {
         // Step 1: Create media on the product (returns media IDs with SKU mapping)
         const productMedia = await this.shopifyTargetService.createProductMedia(
           existingProductId,
-          imageInputs
+          imageInputs,
+          this.sourceService.downloadImage.bind(this.sourceService)
         );
 
         result.imagesUploaded = productMedia.length;
@@ -679,7 +681,11 @@ class ShopifyCreationService {
     allImages.sort((a, b) => (a.position || 0) - (b.position || 0));
 
     try {
-      const uploadedMedia = await this.shopifyTargetService.uploadProductImages(productId, allImages);
+      const uploadedMedia = await this.shopifyTargetService.uploadProductImages(
+        productId,
+        allImages,
+        this.sourceService.downloadImage.bind(this.sourceService)
+      );
       result.uploaded = uploadedMedia?.length || 0;
 
       logger.info('Images uploaded to Shopify', { count: result.uploaded });
@@ -985,7 +991,10 @@ class ShopifyCreationService {
         const { inputs } = this.buildImageInputs(images, parent, []);
         if (inputs.length > 0) {
           logger.info('Uploading standalone product images', { count: inputs.length });
-          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(inputs);
+          fileIds = await this.shopifyTargetService.uploadAndWaitForFiles(
+            inputs,
+            this.sourceService.downloadImage.bind(this.sourceService)
+          );
         }
       }
 

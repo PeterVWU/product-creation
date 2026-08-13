@@ -291,7 +291,11 @@ class ProductUpdateService {
       await shopifyService.deleteAllProductMedia(productId, mediaIds);
 
       if (imageUrls.length > 0) {
-        await shopifyService.createProductMedia(productId, imageUrls);
+        await shopifyService.createProductMedia(
+          productId,
+          imageUrls,
+          this.sourceService.downloadImage.bind(this.sourceService)
+        );
       }
     } catch (error) {
       logger.warn('Image replace failed for Shopify store', { storeName, sku, error: error.message });

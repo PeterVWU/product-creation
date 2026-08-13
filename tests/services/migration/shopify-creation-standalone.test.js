@@ -31,7 +31,9 @@ describe('ShopifyCreationService.createStandaloneProduct', () => {
   };
 
   beforeEach(() => {
-    mockSourceService = {};
+    mockSourceService = {
+      downloadImage: jest.fn().mockResolvedValue({ buffer: Buffer.from('image'), contentType: 'image/jpeg' })
+    };
 
     mockShopifyTargetService = {
       uploadAndWaitForFiles: jest.fn().mockResolvedValue(['gid://shopify/MediaImage/123']),
@@ -117,6 +119,7 @@ describe('ShopifyCreationService.createStandaloneProduct', () => {
     await service.createStandaloneProduct(mockExtractedData, 'teststore');
 
     expect(mockShopifyTargetService.uploadAndWaitForFiles).toHaveBeenCalled();
+    expect(mockShopifyTargetService.uploadAndWaitForFiles.mock.calls[0][1]).toEqual(expect.any(Function));
     const [, , , fileIds] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
     expect(fileIds).toEqual(['gid://shopify/MediaImage/123']);
   });

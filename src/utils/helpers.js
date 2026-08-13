@@ -83,7 +83,10 @@ const buildProductPayload = (productData, options = {}) => {
   return payload;
 };
 
-const REDACTED_KEYS = new Set(['base64_encoded_data']);
+const REDACTED_KEYS = new Map([
+  ['base64_encoded_data', '[BASE64_REDACTED]'],
+  ['originalSource', '[URL_REDACTED]']
+]);
 const MAX_STRING_LENGTH = 500;
 
 const sanitizeLogPayload = (obj, depth = 0) => {
@@ -98,7 +101,7 @@ const sanitizeLogPayload = (obj, depth = 0) => {
   const sanitized = {};
   for (const [key, value] of Object.entries(obj)) {
     if (REDACTED_KEYS.has(key) && typeof value === 'string') {
-      sanitized[key] = '[BASE64_REDACTED]';
+      sanitized[key] = REDACTED_KEYS.get(key);
     } else if (typeof value === 'string' && value.length > MAX_STRING_LENGTH) {
       sanitized[key] = value.substring(0, MAX_STRING_LENGTH) + `... [truncated, ${value.length} chars total]`;
     } else if (typeof value === 'object' && value !== null) {

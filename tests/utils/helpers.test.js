@@ -46,7 +46,7 @@ describe('sanitizeLogPayload', () => {
     expect(result.entry.content.base64_encoded_data).toBe('[BASE64_REDACTED]');
   });
 
-  it('does not redact non-base64 URL strings', () => {
+  it('redacts originalSource URLs used by staged Shopify uploads', () => {
     const input = {
       query: 'mutation fileCreate...',
       variables: {
@@ -57,7 +57,7 @@ describe('sanitizeLogPayload', () => {
       }
     };
     const result = sanitizeLogPayload(input);
-    expect(result.variables.files[0].originalSource).toBe('https://example.com/image.jpg');
+    expect(result.variables.files[0].originalSource).toBe('[URL_REDACTED]');
   });
 
   it('returns placeholder for deeply nested objects beyond depth limit', () => {
