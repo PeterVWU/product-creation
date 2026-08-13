@@ -7,8 +7,10 @@ const { sanitizeLogPayload } = require('../../utils/helpers');
 class ShopifyClient {
   constructor(shopDomain, accessToken, config = {}) {
     this.shopDomain = shopDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    this.accessToken = accessToken;
-    this.apiVersion = config.apiVersion || '2025-01';
+    this.accessToken = typeof accessToken === 'function' ? null : accessToken;
+    this.tokenProvider = typeof accessToken === 'function' ? accessToken : async () => accessToken;
+    this.refreshToken = config.refreshToken;
+    this.apiVersion = config.apiVersion || '2026-07';
     this.timeout = config.timeout || 30000;
     this.maxRetries = config.maxRetries || 3;
     this.retryDelay = config.retryDelay || 1000;
@@ -20,7 +22,6 @@ class ShopifyClient {
       baseURL: this.baseUrl,
       timeout: this.timeout,
       headers: {
-        'X-Shopify-Access-Token': this.accessToken,
         'Content-Type': 'application/json'
       }
     });
@@ -58,7 +59,8 @@ class ShopifyClient {
 
   setupInterceptors() {
     this.client.interceptors.request.use(
-      (config) => {
+      async (config) => {
+        config.headers['X-Shopify-Access-Token'] = await this.tokenProvider();
         const fullUrl = `${config.baseURL}${config.url}`;
         logger.info('Shopify API Request', {
           method: config.method?.toUpperCase(),
@@ -87,7 +89,13 @@ class ShopifyClient {
         });
         return response;
       },
-      (error) => {
+      async (error) => {
+        if (error.response?.status === 401 && this.refreshToken && !error.config?._shopifyAuthRetried) {
+          const token = await this.refreshToken();
+          error.config._shopifyAuthRetried = true;
+          error.config.headers['X-Shopify-Access-Token'] = token;
+          return this.client.request(error.config);
+        }
         const errorMessage = this.extractErrorMessage(error);
         const statusCode = error.response?.status || 500;
 

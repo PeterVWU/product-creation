@@ -161,6 +161,32 @@ Key environment variables:
 - `DB_USER` - Database user (default: `migration_user`)
 - `DB_PASSWORD` - Database password (required)
 - `AUTH_ENABLED` - Set to `true` to require API keys on all routes except health (default: `false`)
+- `SHOPIFY_API_VERSION` - Shopify Admin API version (default: `2026-07`)
+- `SHOPIFY_OAUTH_ENABLED` - Enable database-backed external-store onboarding; requires `AUTH_ENABLED=true`
+- `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` - Credentials shared by OAuth-connected stores
+- `SHOPIFY_PUBLIC_BASE_URL` - Stable public HTTPS origin, without a trailing slash
+- `SHOPIFY_ENCRYPTION_KEYRING` - JSON map of key IDs to base64-encoded 32-byte AES keys, for example `{"2026-08":"..."}`
+- `SHOPIFY_ENCRYPTION_ACTIVE_KEY_ID` - Key ID used for newly encrypted credentials
+
+OAuth requests exactly `write_products`, `write_files`, and `write_publications`. Configure Shopify with these exact endpoints:
+
+- Callback: `<SHOPIFY_PUBLIC_BASE_URL>/api/v1/shopify/oauth/callback`
+- Uninstall webhook: `<SHOPIFY_PUBLIC_BASE_URL>/api/v1/shopify/webhooks/app-uninstalled`
+
+An administrator starts onboarding with `POST /api/v1/shopify/stores/connect` and opens the returned ten-minute URL. `GET /api/v1/shopify/stores` lists database and environment stores without credentials. Before retiring an encryption key, keep both keys in the keyring, select the new active key, and run `npm run shopify:rewrap-tokens`.
+
+The OAuth configuration intentionally uses one Shopify app across many stores. `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` identify the shared app, not a particular merchant store. Each connected `*.myshopify.com` domain authorizes that app separately and receives its own encrypted access and refresh tokens in PostgreSQL. Adding another store therefore requires only another `/stores/connect` request; it does not require another client ID or client secret.
+
+Example onboarding request (requires an administrator API key):
+
+```bash
+curl -X POST https://YOUR_API_DOMAIN/api/v1/shopify/stores/connect \
+  -H "X-API-Key: $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"alias":"new_store","shopDomain":"new-store.myshopify.com"}'
+```
+
+Open the returned `connectUrl` in a browser within ten minutes. The callback verifies Shopify's signature and shop identity, stores encrypted store-specific credentials, reconciles the uninstall webhook, and only then marks the store active.
 
 ### Volumes
 

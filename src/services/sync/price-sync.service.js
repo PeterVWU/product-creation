@@ -4,6 +4,7 @@ const SourceService = require('../magento/source.service');
 const TargetService = require('../magento/target.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
 const NotificationService = require('../notification/notification.service');
+const shopifyRegistry = require('../shopify/shopify-store-registry.service');
 
 class PriceSyncService {
   constructor() {
@@ -44,7 +45,7 @@ class PriceSyncService {
     const includeMagento = options.includeMagento !== false;
     const includeShopify = options.includeShopify !== false;
     const targetMagentoStores = includeMagento ? this.resolveMagentoTargetStores(options.targetMagentoStores) : [];
-    const targetShopifyStores = includeShopify ? this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
+    const targetShopifyStores = includeShopify ? await this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
     const allTargetStores = [...targetMagentoStores, ...targetShopifyStores.map(s => `shopify:${s}`)];
 
     try {
@@ -78,7 +79,7 @@ class PriceSyncService {
       }
 
       // Step 3: Update Shopify prices if enabled
-      if (includeShopify && Object.keys(this.shopifyStores).length > 0) {
+      if (includeShopify && targetShopifyStores.length > 0) {
         const shopifyResult = await this.updateShopifyPrices(priceData, options);
         result.results.shopify = shopifyResult.storeResults;
 
@@ -403,7 +404,7 @@ class PriceSyncService {
    * @returns {Object} Results for each store
    */
   async updateShopifyPrices(priceData, options = {}) {
-    const targetStores = this.resolveShopifyTargetStores(options.targetShopifyStores);
+    const targetStores = await this.resolveShopifyTargetStores(options.targetShopifyStores);
     const storeResults = {};
     const errors = [];
     const warnings = [];
@@ -414,17 +415,8 @@ class PriceSyncService {
     });
 
     for (const storeName of targetStores) {
-      const storeConfig = this.shopifyStores[storeName];
-      if (!storeConfig) {
-        warnings.push({
-          store: storeName,
-          message: `Shopify store "${storeName}" not configured`
-        });
-        continue;
-      }
-
       try {
-        const result = await this.updateShopifyPricesForStore(priceData, storeName, storeConfig);
+        const result = await this.updateShopifyPricesForStore(priceData, storeName);
         storeResults[storeName] = result;
       } catch (error) {
         storeResults[storeName] = {
@@ -449,11 +441,9 @@ class PriceSyncService {
    * Update prices for a single Shopify store
    */
   async updateShopifyPricesForStore(priceData, storeName, storeConfig) {
-    const shopifyService = new ShopifyTargetService(
-      storeConfig.url,
-      storeConfig.token,
-      { apiVersion: config.shopify.apiVersion }
-    );
+    const shopifyService = storeConfig
+      ? new ShopifyTargetService(storeConfig.url, storeConfig.token, { apiVersion: config.shopify.apiVersion })
+      : await shopifyRegistry.getTargetService(storeName);
 
     // Check if this store has a mapped customer group for tier pricing
     const groupId = config.priceSync.storeGroupMapping[storeName.toLowerCase()];
@@ -618,7 +608,15 @@ class PriceSyncService {
    * Resolve target Shopify stores from options or config defaults
    */
   resolveShopifyTargetStores(optionStores) {
-    const availableStores = Object.keys(this.shopifyStores);
+    if (!config.shopify.oauth?.enabled) {
+      const availableStores = Object.keys(this.shopifyStores);
+      return optionStores?.length ? optionStores.filter(store => availableStores.includes(store.toLowerCase())).map(store => store.toLowerCase()) : availableStores;
+    }
+    return this.resolveDatabaseShopifyTargetStores(optionStores);
+  }
+
+  async resolveDatabaseShopifyTargetStores(optionStores) {
+    const availableStores = (await shopifyRegistry.list()).filter(store => store.status === 'active').map(store => store.alias);
 
     if (optionStores && Array.isArray(optionStores) && optionStores.length > 0) {
       // Filter to only include configured stores

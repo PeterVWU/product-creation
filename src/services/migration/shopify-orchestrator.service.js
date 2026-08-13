@@ -10,6 +10,7 @@ const StandaloneExtractionService = require('./standalone-extraction.service');
 const ContentGenerationService = require('../ai/content-generation.service');
 const aiPromptRepo = require('../../database/repositories/ai-prompt.repository');
 const { ExtractionError } = require('../../utils/error-handler');
+const shopifyRegistry = require('../shopify/shopify-store-registry.service');
 
 class ShopifyOrchestratorService {
   constructor() {
@@ -34,25 +35,8 @@ class ShopifyOrchestratorService {
     };
   }
 
-  getShopifyTargetService(storeName) {
-    // Use provided store name, or fall back to configured default
-    const targetStore = storeName || this.shopifyConfig.defaultStore;
-
-    if (targetStore && this.shopifyConfig.stores[targetStore]) {
-      const storeConfig = this.shopifyConfig.stores[targetStore];
-      return new ShopifyTargetService(
-        storeConfig.url,
-        storeConfig.token,
-        { apiVersion: this.shopifyConfig.apiVersion, ...config.api }
-      );
-    }
-
-    // List available stores in error message
-    const available = Object.keys(this.shopifyConfig.stores);
-    throw new Error(
-      `Shopify store '${targetStore || 'default'}' not configured. ` +
-      `Available stores: ${available.length ? available.join(', ') : 'none'}`
-    );
+  async getShopifyTargetService(storeName) {
+    return shopifyRegistry.getTargetService(storeName || this.shopifyConfig.defaultStore);
   }
 
   async migrateProduct(sku, options = {}) {
@@ -115,7 +99,7 @@ class ShopifyOrchestratorService {
         const childSkus = extractedData.children.map(child => child.sku);
         await this.notificationService.notifyMigrationStart(sku, childSkus, [shopifyStore]);
 
-        const shopifyTargetService = this.getShopifyTargetService(options.shopifyStore);
+        const shopifyTargetService = await this.getShopifyTargetService(options.shopifyStore);
         const creationService = new ShopifyCreationService(this.sourceService, shopifyTargetService, this.categoryMappingService, options.shopifyStore);
 
         const hasChildren = extractedData.children && extractedData.children.length > 0;
@@ -439,7 +423,7 @@ class ShopifyOrchestratorService {
   async migrateStandaloneToStore(sku, extractedData, shopifyStore, migrationOptions, migrationContext, migrationStartTime) {
     const phaseStartTime = Date.now();
 
-    const shopifyTargetService = this.getShopifyTargetService(shopifyStore);
+    const shopifyTargetService = await this.getShopifyTargetService(shopifyStore);
     const creationService = new ShopifyCreationService(
       this.sourceService,
       shopifyTargetService,
@@ -582,7 +566,7 @@ class ShopifyOrchestratorService {
     logger.info('Testing Shopify connection', { storeName });
 
     try {
-      const shopifyTargetService = this.getShopifyTargetService(storeName);
+      const shopifyTargetService = await this.getShopifyTargetService(storeName);
       return await shopifyTargetService.testConnection();
     } catch (error) {
       return {

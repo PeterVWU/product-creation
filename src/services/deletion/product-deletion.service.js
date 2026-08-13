@@ -3,28 +3,19 @@ const config = require('../../config');
 const SourceService = require('../magento/source.service');
 const TargetService = require('../magento/target.service');
 const ShopifyTargetService = require('../shopify/shopify-target.service');
+const shopifyRegistry = require('../shopify/shopify-store-registry.service');
 
 class ProductDeletionService {
   /**
    * Get the appropriate platform service instance.
    */
-  _getService(platform, storeName) {
+  async _getService(platform, storeName) {
     switch (platform) {
       case 'source-magento':
         return new SourceService(config.source.baseUrl, config.source.token, config.api);
       case 'target-magento':
         return TargetService.getInstanceForStore(storeName);
-      case 'target-shopify': {
-        const storeConfig = config.shopify.stores[storeName];
-        if (!storeConfig) {
-          const available = Object.keys(config.shopify.stores);
-          throw Object.assign(
-            new Error(`Shopify store '${storeName}' not configured. Available: ${available.join(', ') || 'none'}`),
-            { statusCode: 400 }
-          );
-        }
-        return new ShopifyTargetService(storeConfig.url, storeConfig.token);
-      }
+      case 'target-shopify': return shopifyRegistry.getTargetService(storeName);
       default:
         throw Object.assign(
           new Error(`Invalid platform: ${platform}`),
@@ -90,7 +81,7 @@ class ProductDeletionService {
   async deleteProduct({ sku, platform, storeName }) {
     logger.info('Starting product deletion', { sku, platform, storeName });
 
-    const service = this._getService(platform, storeName);
+    const service = await this._getService(platform, storeName);
     const deletedSkus = [];
     const failedSkus = [];
 

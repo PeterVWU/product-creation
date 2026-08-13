@@ -1,0 +1,13 @@
+const express = require('express');
+const asyncHandler = require('../../utils/async-handler');
+const auth = require('../../middleware/auth.middleware');
+const permit = require('../../middleware/permission.middleware');
+const controller = require('../../controllers/shopify.controller');
+const config = require('../../config');
+const router = express.Router();
+const requireOAuth = (_req, res, next) => config.shopify.oauth.enabled ? next() : res.status(404).json({ success: false, message: 'Shopify OAuth onboarding is disabled' });
+router.post('/stores/connect', requireOAuth, auth(), permit('*'), asyncHandler(controller.connect));
+router.get('/stores', auth(), permit('*'), asyncHandler(controller.list));
+router.get('/oauth/start', requireOAuth, asyncHandler(controller.start));
+router.get('/oauth/callback', requireOAuth, asyncHandler(controller.callback));
+module.exports = router;

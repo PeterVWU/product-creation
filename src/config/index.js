@@ -114,9 +114,18 @@ const config = {
   },
 
   shopify: {
-    apiVersion: process.env.SHOPIFY_API_VERSION || '2025-01',
+    apiVersion: process.env.SHOPIFY_API_VERSION || '2026-07',
     defaultStore: process.env.SHOPIFY_DEFAULT_STORE || null,
-    stores: parseShopifyStores()
+    stores: parseShopifyStores(),
+    oauth: {
+      enabled: process.env.SHOPIFY_OAUTH_ENABLED === 'true',
+      clientId: process.env.SHOPIFY_CLIENT_ID,
+      clientSecret: process.env.SHOPIFY_CLIENT_SECRET,
+      publicBaseUrl: (process.env.SHOPIFY_PUBLIC_BASE_URL || '').replace(/\/$/, ''),
+      scopes: ['write_products', 'write_files', 'write_publications'],
+      keyring: (() => { try { return JSON.parse(process.env.SHOPIFY_ENCRYPTION_KEYRING || '{}'); } catch (_) { throw new Error('SHOPIFY_ENCRYPTION_KEYRING must be valid JSON'); } })(),
+      activeKeyId: process.env.SHOPIFY_ENCRYPTION_ACTIVE_KEY_ID
+    }
   },
 
   openai: {
@@ -184,6 +193,13 @@ const validateConfig = () => {
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+  if (config.shopify.oauth.enabled) {
+    if (!config.auth.enabled) throw new Error('AUTH_ENABLED=true is required when SHOPIFY_OAUTH_ENABLED=true');
+    const oauthRequired = ['clientId', 'clientSecret', 'publicBaseUrl', 'activeKeyId'];
+    const oauthMissing = oauthRequired.filter(key => !config.shopify.oauth[key]);
+    if (oauthMissing.length) throw new Error(`Missing Shopify OAuth configuration: ${oauthMissing.join(', ')}`);
+    if (!config.shopify.oauth.publicBaseUrl.startsWith('https://')) throw new Error('SHOPIFY_PUBLIC_BASE_URL must use HTTPS');
   }
 };
 

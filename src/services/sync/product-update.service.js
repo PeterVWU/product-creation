@@ -9,6 +9,7 @@ const AttributeService = require('../attribute.service');
 const CategoryMappingService = require('../category-mapping.service');
 const NotificationService = require('../notification/notification.service');
 const { ExtractionError } = require('../../utils/error-handler');
+const shopifyRegistry = require('../shopify/shopify-store-registry.service');
 
 class ProductUpdateService {
   constructor() {
@@ -65,7 +66,15 @@ class ProductUpdateService {
   }
 
   resolveShopifyTargetStores(optionStores) {
-    const available = Object.keys(this.shopifyStores);
+    if (!config.shopify.oauth?.enabled) {
+      const available = Object.keys(this.shopifyStores);
+      return optionStores?.length ? optionStores.filter(s => available.includes(s.toLowerCase())).map(s => s.toLowerCase()) : available;
+    }
+    return this.resolveDatabaseShopifyTargetStores(optionStores);
+  }
+
+  async resolveDatabaseShopifyTargetStores(optionStores) {
+    const available = (await shopifyRegistry.list()).filter(store => store.status === 'active').map(store => store.alias);
     if (optionStores && Array.isArray(optionStores) && optionStores.length > 0) {
       return optionStores.filter(s => available.includes(s.toLowerCase())).map(s => s.toLowerCase());
     }
@@ -233,14 +242,8 @@ class ProductUpdateService {
   async updateShopifyStore(storeName, extractedData) {
     const { sourceProduct, productType, brandLabel, categories, firstChildSku } = extractedData;
     const sku = sourceProduct.sku;
-    const storeConfig = this.shopifyStores[storeName];
     const warnings = [];
-
-    const shopifyService = new ShopifyTargetService(
-      storeConfig.url,
-      storeConfig.token,
-      { apiVersion: config.shopify.apiVersion }
-    );
+    const shopifyService = await shopifyRegistry.getTargetService(storeName);
 
     // 1. Existence check
     const lookupSku = productType === 'configurable' ? firstChildSku : sku;
@@ -310,7 +313,7 @@ class ProductUpdateService {
     const includeMagento = options.includeMagento !== false;
     const includeShopify = options.includeShopify !== false;
     const targetMagentoStores = includeMagento ? this.resolveMagentoTargetStores(options.targetMagentoStores) : [];
-    const targetShopifyStores = includeShopify ? this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
+    const targetShopifyStores = includeShopify ? await this.resolveShopifyTargetStores(options.targetShopifyStores) : [];
     const allTargetStores = [
       ...targetMagentoStores,
       ...targetShopifyStores.map(s => `shopify:${s}`)

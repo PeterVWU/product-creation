@@ -6,6 +6,7 @@ const productRoutes = require('./product.routes');
 const keyRoutes = require('./key.routes');
 const promptRoutes = require('./prompt.routes');
 const auditRoutes = require('./audit.routes');
+const shopifyRoutes = require('./shopify.routes');
 
 const router = express.Router();
 
@@ -16,5 +17,6 @@ router.use('/products', productRoutes);
 router.use('/keys', keyRoutes);
 router.use('/prompts', promptRoutes);
 router.use('/audit', auditRoutes);
+router.use('/shopify', shopifyRoutes);
 
 module.exports = router;

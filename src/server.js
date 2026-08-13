@@ -2,6 +2,7 @@ const app = require('./app');
 const config = require('./config');
 const logger = require('./config/logger');
 const db = require('./database/connection');
+const shopifyRegistry = require('./services/shopify/shopify-store-registry.service');
 
 const PORT = config.server.port;
 
@@ -32,7 +33,13 @@ const startServer = async () => {
     logger.info(`Magento Health: http://localhost:${PORT}/api/v1/health/magento`);
   });
 
+  const maintenanceTimer = setInterval(() => {
+    shopifyRegistry.maintain().catch(error => logger.error('Shopify credential maintenance failed', { error: error.message }));
+  }, 24 * 60 * 60 * 1000);
+  maintenanceTimer.unref();
+
   const gracefulShutdown = (signal) => {
+    clearInterval(maintenanceTimer);
     logger.info(`${signal} received, shutting down gracefully`);
 
     server.close(async () => {
