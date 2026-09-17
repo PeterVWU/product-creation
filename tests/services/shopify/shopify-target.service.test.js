@@ -330,7 +330,12 @@ describe('ShopifyTargetService', () => {
       const fileCreateVariables = service.query.mock.calls.find(([query]) => query.includes('mutation fileCreate'))[1];
       expect(fileCreateVariables.files[0].originalSource).toBe('https://staged.test/photo.jpg');
       expect(fileCreateVariables.files[0].originalSource).not.toBe(magentoUrl);
-      expect(files).toEqual([{ id: 'gid://shopify/MediaImage/1', alt: 'Photo', sku: 'SKU-1' }]);
+      expect(files).toEqual([{
+        id: 'gid://shopify/MediaImage/1',
+        alt: 'Photo',
+        sku: 'SKU-1',
+        skus: ['SKU-1']
+      }]);
       axios.post.mockRestore();
     });
 
@@ -346,8 +351,36 @@ describe('ShopifyTargetService', () => {
         { url: 'https://magento.test/second.jpg', sku: 'SKU-2' }
       ], jest.fn());
 
-      expect(result).toEqual([null, { id: 'gid://shopify/MediaImage/2', alt: undefined, sku: 'SKU-2' }]);
+      expect(result).toEqual([null, {
+        id: 'gid://shopify/MediaImage/2',
+        alt: undefined,
+        sku: 'SKU-2',
+        skus: ['SKU-2']
+      }]);
       expect(service.createFile).toHaveBeenCalledWith('https://staged.test/second.jpg', undefined);
+    });
+
+    it('reuses one Shopify file for byte-identical staged images', async () => {
+      jest.spyOn(service, 'stageImage')
+        .mockResolvedValueOnce({ resourceUrl: 'https://staged.test/one.jpg', contentHash: 'same' })
+        .mockResolvedValueOnce({ resourceUrl: 'https://staged.test/two.jpg', contentHash: 'same' });
+      jest.spyOn(service, 'createFile').mockResolvedValue({
+        id: 'gid://shopify/MediaImage/1',
+        fileStatus: 'UPLOADED'
+      });
+      jest.spyOn(service, 'waitForFileReady').mockResolvedValue({ fileStatus: 'READY' });
+
+      const result = await service.uploadAndWaitForFiles([
+        { url: 'https://magento.test/one.jpg', sku: 'SKU-1' },
+        { url: 'https://magento.test/two.jpg', sku: 'SKU-2' }
+      ], jest.fn());
+
+      expect(service.createFile).toHaveBeenCalledTimes(1);
+      expect(result.map(file => file.id)).toEqual([
+        'gid://shopify/MediaImage/1',
+        'gid://shopify/MediaImage/1'
+      ]);
+      expect(result[1].skus).toEqual(['SKU-2']);
     });
 
     it('stages existing-product media and retains SKU ordering', async () => {
@@ -361,7 +394,7 @@ describe('ShopifyTargetService', () => {
       jest.spyOn(service, 'waitForMediaReady').mockResolvedValue({ status: 'READY' });
 
       const result = await service.createProductMedia('product-1', [
-        { url: 'magento-1', sku: 'SKU-1' },
+        { url: 'magento-1', sku: 'SKU-1', skus: ['SKU-1', 'SKU-ALIAS'] },
         { url: 'magento-2', sku: 'SKU-2' },
         { url: 'magento-3', sku: 'SKU-3' }
       ], jest.fn());
@@ -369,7 +402,32 @@ describe('ShopifyTargetService', () => {
       expect(service.query.mock.calls[0][1].media.map(media => media.originalSource)).toEqual([
         'https://staged.test/one.jpg', 'https://staged.test/three.jpg'
       ]);
-      expect(result).toEqual([{ id: 'media-1', sku: 'SKU-1' }, { id: 'media-3', sku: 'SKU-3' }]);
+      expect(result).toEqual([
+        { id: 'media-1', sku: 'SKU-1', skus: ['SKU-1', 'SKU-ALIAS'] },
+        { id: 'media-3', sku: 'SKU-3', skus: ['SKU-3'] }
+      ]);
+    });
+
+    it('creates one existing-product media item for byte-identical images and merges SKUs', async () => {
+      jest.spyOn(service, 'stageImage')
+        .mockResolvedValueOnce({ resourceUrl: 'https://staged.test/one.jpg', contentHash: 'same' })
+        .mockResolvedValueOnce({ resourceUrl: 'https://staged.test/two.jpg', contentHash: 'same' });
+      service.query = jest.fn().mockResolvedValue({
+        data: { productCreateMedia: { media: [{ id: 'media-1' }], mediaUserErrors: [] } }
+      });
+      jest.spyOn(service, 'waitForMediaReady').mockResolvedValue({ status: 'READY' });
+
+      const result = await service.createProductMedia('product-1', [
+        { url: 'magento-1', sku: 'SKU-1' },
+        { url: 'magento-2', sku: 'SKU-2' }
+      ], jest.fn());
+
+      expect(service.query.mock.calls[0][1].media).toHaveLength(1);
+      expect(result).toEqual([{
+        id: 'media-1',
+        sku: 'SKU-1',
+        skus: ['SKU-1', 'SKU-2']
+      }]);
     });
   });
 });

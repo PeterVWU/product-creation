@@ -9,6 +9,7 @@ const AttributeService = require('../attribute.service');
 const CategoryMappingService = require('../category-mapping.service');
 const NotificationService = require('../notification/notification.service');
 const { ExtractionError } = require('../../utils/error-handler');
+const { imageContentHash, uniqueMediaEntries } = require('../../utils/image-deduplication');
 const shopifyRegistry = require('../shopify/shopify-store-registry.service');
 
 class ProductUpdateService {
@@ -110,7 +111,7 @@ class ProductUpdateService {
 
   buildSourceImageUrls(mediaEntries) {
     const baseUrl = config.source.baseUrl;
-    return (mediaEntries || []).map(entry => ({
+    return uniqueMediaEntries(mediaEntries).map(entry => ({
       url: `${baseUrl}/media/catalog/product${entry.file}`,
       alt: entry.label || ''
     }));
@@ -208,9 +209,12 @@ class ProductUpdateService {
       const mediaEntries = existingProduct.media_gallery_entries || [];
       await targetService.deleteAllProductMedia(sku, mediaEntries);
 
-      for (const entry of (sourceProduct.media_gallery_entries || [])) {
+      const uploadedContentHashes = new Set();
+      for (const entry of uniqueMediaEntries(sourceProduct.media_gallery_entries || [])) {
         try {
           const { buffer, contentType } = await this.sourceService.downloadImage(entry.file);
+          const contentHash = imageContentHash(buffer);
+          if (uploadedContentHashes.has(contentHash)) continue;
           const base64 = buffer.toString('base64');
           await targetService.uploadProductImage(sku, base64, {
             label: entry.label || '',
@@ -219,6 +223,7 @@ class ProductUpdateService {
             contentType: contentType || 'image/jpeg',
             fileName: entry.file?.split('/').pop() || `${sku}-image.jpg`
           });
+          uploadedContentHashes.add(contentHash);
         } catch (imgError) {
           logger.warn('Failed to upload source image, skipping', { sku, file: entry.file, error: imgError.message });
           warnings.push({ field: 'images', message: `Image upload failed: ${imgError.message}` });
