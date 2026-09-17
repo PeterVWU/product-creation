@@ -3,6 +3,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const path = require('path');
 const logger = require('../../config/logger');
+const { imageContentHash } = require('../../utils/image-deduplication');
 
 class ShopifyTargetService extends ShopifyClient {
   constructor(shopDomain, accessToken, config = {}) {
@@ -125,7 +126,9 @@ class ShopifyTargetService extends ShopifyClient {
 
     // Include files if provided (files should be pre-uploaded file IDs from uploadAndWaitForFiles)
     // The files array may contain null entries for failed uploads - filter them out
-    const validFiles = files.filter(f => f !== null);
+    const validFiles = [
+      ...new Map(files.filter(f => f !== null).map(file => [file.id, file])).values()
+    ];
     if (validFiles.length > 0) {
       input.files = validFiles.map(f => ({
         id: f.id,  // Use the Shopify file ID, not external URL
@@ -195,10 +198,32 @@ class ShopifyTargetService extends ShopifyClient {
     });
 
     const stagedImages = [];
+    const contentHashToIndex = new Map();
     for (const image of images) {
       try {
         const staged = await this.stageImage(image, imageLoader);
-        stagedImages.push({ ...image, stagedUrl: staged.resourceUrl });
+        const duplicateIndex = staged.contentHash
+          ? contentHashToIndex.get(staged.contentHash)
+          : undefined;
+
+        if (duplicateIndex !== undefined) {
+          const existing = stagedImages[duplicateIndex];
+          const associatedSkus = image.skus?.length
+            ? image.skus
+            : (image.sku ? [image.sku] : []);
+          for (const sku of associatedSkus) {
+            if (!existing.skus.includes(sku)) existing.skus.push(sku);
+          }
+          continue;
+        }
+
+        const stagedImage = {
+          ...image,
+          skus: image.skus?.length ? [...image.skus] : (image.sku ? [image.sku] : []),
+          stagedUrl: staged.resourceUrl
+        };
+        if (staged.contentHash) contentHashToIndex.set(staged.contentHash, stagedImages.length);
+        stagedImages.push(stagedImage);
       } catch (error) {
         logger.warn('Failed to stage product image, skipping', {
           sku: image.sku,
@@ -252,7 +277,10 @@ class ShopifyTargetService extends ShopifyClient {
     const createdMedia = result.data.productCreateMedia.media || [];
     const mediaWithSkus = createdMedia.map((media, index) => ({
       id: media.id,
-      sku: stagedImages[index]?.sku || null
+      sku: stagedImages[index]?.sku || null,
+      skus: stagedImages[index]?.skus?.length
+        ? [...stagedImages[index].skus]
+        : (stagedImages[index]?.sku ? [stagedImages[index].sku] : [])
     }));
 
     logger.info('Product media created', {
@@ -501,7 +529,12 @@ class ShopifyTargetService extends ShopifyClient {
     const filename = this.buildImageFilename(image.url, mimeType);
     const target = await this.createStagedUpload(filename, mimeType, buffer.length);
     await this.uploadToStagedTarget(target, buffer, filename, mimeType);
-    return { resourceUrl: target.resourceUrl, filename, mimeType };
+    return {
+      resourceUrl: target.resourceUrl,
+      filename,
+      mimeType,
+      contentHash: imageContentHash(buffer)
+    };
   }
 
   /**
@@ -584,10 +617,24 @@ class ShopifyTargetService extends ShopifyClient {
     logger.info('Uploading images to Shopify CDN', { count: images.length });
 
     const fileIds = [];
+    const contentHashToFile = new Map();
 
     for (const image of images) {
       try {
         const staged = await this.stageImage(image, imageLoader);
+        const existingFile = staged.contentHash
+          ? contentHashToFile.get(staged.contentHash)
+          : null;
+        if (existingFile) {
+          fileIds.push({
+            ...existingFile,
+            alt: image.alt,
+            sku: image.sku,
+            skus: image.skus?.length ? [...image.skus] : (image.sku ? [image.sku] : [])
+          });
+          continue;
+        }
+
         const file = await this.createFile(staged.resourceUrl, image.alt);
         logger.info('File created in Shopify', { fileId: file.id, status: file.fileStatus, sku: image.sku });
 
@@ -595,11 +642,14 @@ class ShopifyTargetService extends ShopifyClient {
         await this.waitForFileReady(file.id);
         logger.info('File ready', { fileId: file.id });
 
-        fileIds.push({
+        const uploadedFile = {
           id: file.id,
           alt: image.alt,
-          sku: image.sku  // Preserve SKU for variant association
-        });
+          sku: image.sku,  // Preserve legacy single-SKU association
+          skus: image.skus?.length ? [...image.skus] : (image.sku ? [image.sku] : [])
+        };
+        if (staged.contentHash) contentHashToFile.set(staged.contentHash, uploadedFile);
+        fileIds.push(uploadedFile);
       } catch (error) {
         logger.warn('Failed to upload image, skipping', { url: image.url, sku: image.sku, error: error.message });
         // Push null to preserve indices for SKU-to-file mapping

@@ -1,6 +1,7 @@
 const logger = require('../../config/logger');
 const config = require('../../config');
 const { CreationError } = require('../../utils/error-handler');
+const { canonicalImageSource } = require('../../utils/image-deduplication');
 const vapordnaFormatter = require('./formatters/vapordna.formatter');
 const StoreDescriptionService = require('./store-description.service');
 
@@ -121,7 +122,7 @@ class ShopifyCreationService {
       }
 
       // Count images uploaded (filter out null entries from failed uploads)
-      result.imagesUploaded = fileIds.filter(f => f !== null).length;
+      result.imagesUploaded = new Set(fileIds.filter(Boolean).map(file => file.id)).size;
 
       logger.info('Shopify product created with variants', {
         productId: createdProduct.id,
@@ -279,9 +280,13 @@ class ShopifyCreationService {
         const variantMedia = [];
 
         for (const media of productMedia) {
-          if (media.sku) {
+          const associatedSkus = media.skus?.length
+            ? media.skus
+            : (media.sku ? [media.sku] : []);
+
+          for (const sku of associatedSkus) {
             const createdVariant = createdVariants.find(v =>
-              v.sku === media.sku || v.inventoryItem?.sku === media.sku
+              v.sku === sku || v.inventoryItem?.sku === sku
             );
 
             if (createdVariant) {
@@ -722,6 +727,29 @@ class ShopifyCreationService {
   buildImageInputs(images, parent, children) {
     const inputs = [];
     const skuToFileIndex = {}; // Maps child SKU to file index
+    const sourceToFileIndex = new Map();
+
+    const addImage = (imageUrl, alt, sku = null) => {
+      const sourceKey = canonicalImageSource(imageUrl);
+      if (!sourceKey) return;
+
+      let fileIndex = sourceToFileIndex.get(sourceKey);
+      if (fileIndex === undefined) {
+        fileIndex = inputs.length;
+        sourceToFileIndex.set(sourceKey, fileIndex);
+        inputs.push({
+          url: imageUrl,
+          alt,
+          sku,
+          skus: sku ? [sku] : []
+        });
+      } else if (sku) {
+        const associatedSkus = inputs[fileIndex].skus;
+        if (!associatedSkus.includes(sku)) associatedSkus.push(sku);
+      }
+
+      if (sku) skuToFileIndex[sku] = fileIndex;
+    };
 
     // Add parent images first
     if (images.parent && images.parent.length > 0) {
@@ -730,11 +758,7 @@ class ShopifyCreationService {
       for (const img of sortedImages) {
         const imageUrl = this.buildMagentoImageUrl(img.file, parent);
         if (imageUrl) {
-          inputs.push({
-            url: imageUrl,
-            alt: img.label || parent.name,
-            sku: null  // Parent image, not variant-specific
-          });
+          addImage(imageUrl, img.label || parent.name);
         }
       }
     }
@@ -747,12 +771,7 @@ class ShopifyCreationService {
           const img = childImages[0];
           const imageUrl = this.buildMagentoImageUrl(img.file, parent);
           if (imageUrl) {
-            skuToFileIndex[childSku] = inputs.length; // Track index before adding
-            inputs.push({
-              url: imageUrl,
-              alt: img.label || childSku,
-              sku: childSku  // Track which variant this belongs to
-            });
+            addImage(imageUrl, img.label || childSku, childSku);
           }
         }
       }
@@ -761,7 +780,10 @@ class ShopifyCreationService {
     logger.debug('Built image inputs for upload', {
       count: inputs.length,
       parentImages: images.parent?.length || 0,
-      childSkusWithImages: Object.keys(skuToFileIndex).length
+      childSkusWithImages: Object.keys(skuToFileIndex).length,
+      duplicateReferencesRemoved:
+        (images.parent?.length || 0) + Object.values(images.children || {})
+          .filter(childImages => childImages?.length > 0).length - inputs.length
     });
 
     return { inputs, skuToFileIndex };

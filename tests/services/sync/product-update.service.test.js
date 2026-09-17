@@ -160,6 +160,16 @@ describe('ProductUpdateService', () => {
     it('returns empty array for empty entries', () => {
       expect(service.buildSourceImageUrls([])).toEqual([]);
     });
+
+    it('deduplicates repeated source media files', () => {
+      const urls = service.buildSourceImageUrls([
+        { file: '/a/img.jpg', label: 'Front' },
+        { file: '/a/img.jpg', label: 'Repeated' }
+      ]);
+
+      expect(urls).toHaveLength(1);
+      expect(urls[0].alt).toBe('Front');
+    });
   });
 
   // ── updateMagentoStore ────────────────────────────────────────────────────

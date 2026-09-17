@@ -1,6 +1,7 @@
 const logger = require('../config/logger');
 const sharp = require('sharp');
 const { ImageProcessingError } = require('../utils/error-handler');
+const { imageContentHash, uniqueMediaEntries } = require('../utils/image-deduplication');
 
 class ImageService {
   constructor(sourceService, targetService, config = {}) {
@@ -106,20 +107,30 @@ class ImageService {
   }
 
   async migrateProductImages(sku, imageEntries) {
+    const uniqueEntries = uniqueMediaEntries(imageEntries);
     logger.info('Starting image migration', {
       sku,
-      totalImages: imageEntries.length
+      totalImages: imageEntries.length,
+      uniqueImages: uniqueEntries.length,
+      duplicateReferencesRemoved: imageEntries.length - uniqueEntries.length
     });
 
     const results = {
       success: [],
-      failed: []
+      failed: [],
+      skippedDuplicates: []
     };
+    const uploadedContentHashes = new Set();
 
-    for (const [index, entry] of imageEntries.entries()) {
+    for (const [index, entry] of uniqueEntries.entries()) {
       try {
         logger.debug('Downloading image', { sku, file: entry.file });
         const imageData = await this.downloadImage(entry.file);
+        const contentHash = imageContentHash(imageData.buffer);
+        if (uploadedContentHashes.has(contentHash)) {
+          results.skippedDuplicates.push({ file: entry.file, reason: 'duplicate-content' });
+          continue;
+        }
 
         const metadata = {
           label: entry.label || 'Product Image',
@@ -135,6 +146,7 @@ class ImageService {
           file: entry.file,
           imageId: result
         });
+        uploadedContentHashes.add(contentHash);
 
         logger.info('Image uploaded successfully', {
           sku,
