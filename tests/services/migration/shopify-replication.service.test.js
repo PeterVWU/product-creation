@@ -18,7 +18,7 @@ function fixture() {
   const row = { creation_handle: 'migration-handle', variants: {}, images: {}, initialized: false, created_by_migration: false };
   const save = jest.fn(async values => Object.assign(row, copy(values)));
   const reader = {
-    shop: jest.fn(async () => ({ id: 'target-shop', myshopifyDomain: 'target.myshopify.com', primaryDomain: { url: 'https://public.example' } })),
+    shop: jest.fn(async () => ({ id: 'target-shop', name: 'Cloud & Co', myshopifyDomain: 'target.myshopify.com', primaryDomain: { url: 'https://public.example' } })),
     product: jest.fn(async () => copy(target)), byHandle: jest.fn(async () => null), bySkus: jest.fn(async () => [])
   };
   const writer = {
@@ -216,4 +216,37 @@ https://vapordna.com.evil.example/a https://other.example/vapordna.com support@v
 <img src='//store.example/a.jpg'><a href="https://store.example/">Link</a>
 https://vapordna.com.evil.example/a https://other.example/vapordna.com support@vapordna.com`);
   });
+});
+
+describe('destination branding', () => {
+  const { rewriteStoreReferences } = Service;
+  test('replaces brand names in HTML text and accessible labels without changing markup or URL paths', () => {
+    const html = '<p>Shop VaporDNA, Vapor DNA, vApOrDnA.</p><a href="https://vapordna.com/VaporDNA?q=VaporDNA" title="Visit VaporDNA">VaporDNA</a><img alt="Vapor&nbsp;DNA"><a href="https://other.example/VaporDNA">Other</a>';
+    expect(rewriteStoreReferences(html, 'https://cloud.example', 'Cloud & Co', true)).toBe(
+      '<p>Shop Cloud &amp; Co, Cloud &amp; Co, Cloud &amp; Co.</p><a href="https://cloud.example/VaporDNA?q=VaporDNA" title="Visit Cloud &amp; Co">Cloud &amp; Co</a><img alt="Cloud &amp; Co"><a href="https://other.example/VaporDNA">Other</a>'
+    );
+  });
+  test('replaces meta-description branding as plain text, retaining URL suffixes and email addresses', () => {
+    expect(rewriteStoreReferences('Buy at VaporDNA. Visit https://vapordna.com/products/a?q=VaporDNA#x or support@vapordna.com.',
+      'https://cloud.example', 'Cloud & Co')).toBe('Buy at Cloud & Co. Visit https://cloud.example/products/a?q=VaporDNA#x or support@vapordna.com.');
+  });
+  test('applies branding during creation and content updates, retaining the SEO title', async () => {
+    const f = fixture();
+    f.product.descriptionHtml = '<p>Shop at VaporDNA.</p>';
+    f.product.seo = { title: 'Original SEO title', description: 'Buy at Vapor DNA.' };
+    expect((await f.service.run('1', options)).success).toBe(true);
+    expect(f.writer.createShell.mock.calls[0][2]).toMatchObject({
+      descriptionHtml: '<p>Shop at Cloud &amp; Co.</p>', seo: { title: 'Original SEO title', description: 'Buy at Cloud & Co.' }
+    });
+    f.writer.content.mockClear();
+    expect((await f.service.run('1', options, 'content')).success).toBe(true);
+    expect(f.writer.content.mock.calls[0][1]).toMatchObject({
+      descriptionHtml: '<p>Shop at Cloud &amp; Co.</p>', seo: { description: 'Buy at Cloud & Co.' }
+    });
+  });
+});
+
+test('rewrites bare storefront references without changing emails or lookalike domains', () => {
+  expect(Service.rewriteStoreReferences('VaporDNA.com. www.vapordna.com — VaporDNA! support@vapordna.com vapordna.com.evil.example',
+    'https://cloud.example', 'Cloud & Co')).toBe('cloud.example. cloud.example — Cloud & Co! support@vapordna.com vapordna.com.evil.example');
 });

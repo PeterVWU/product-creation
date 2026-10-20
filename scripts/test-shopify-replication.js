@@ -60,7 +60,7 @@ async function main() {
       body: JSON.stringify({ sourceProductId, options: { targetShopifyStores: ['test'], ...options } }) });
     return { status: response.status, body: await response.json() };
   };
-  const { rewriteDescription } = require('../src/services/migration/shopify-replication.service');
+  const { rewriteStoreReferences } = require('../src/services/migration/shopify-replication.service');
   for (const id of ids) {
     const product = await source.product(id);
     assert(product, 'Source exists');
@@ -140,7 +140,7 @@ async function main() {
     assert.equal(result.status, 200, JSON.stringify(result.body));
     copied = await target.product(targetId);
     assert.equal(copied.title, product.title);
-    assert.equal(copied.descriptionHtml, rewriteDescription(product.descriptionHtml, targetIdentity.primaryDomain.url));
+    assert.equal(copied.descriptionHtml, rewriteStoreReferences(product.descriptionHtml, targetIdentity.primaryDomain.url, targetIdentity.name, true));
     assert.equal(copied.status, originalStatus);
     assert.equal(copied.images.length, product.images.length);
     assert.equal(copied.variants[0].sku, product.variants[0].sku);
@@ -148,7 +148,8 @@ async function main() {
     assert.equal(copied.vendor, product.vendor);
     assert.equal(copied.productType, product.productType);
     assert.deepEqual([...copied.tags].sort(), [...product.tags].sort());
-    assert.deepEqual(copied.seo, product.seo);
+    assert.equal(copied.seo.title, product.seo.title);
+    assert.equal(copied.seo.description, rewriteStoreReferences(product.seo.description, targetIdentity.primaryDomain.url, targetIdentity.name) || null);
     for (const variant of product.variants) {
       const dest = copied.variants.find(v => v.id === mapping.variants[variant.id]);
       const expectedImage = mapping.images[variant.media.nodes[0]?.id]?.id;

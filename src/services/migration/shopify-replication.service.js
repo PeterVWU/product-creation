@@ -17,6 +17,26 @@ function rewriteDescription(html, storefront) {
     prefix => `${prefix.startsWith('//') ? '//' : destination.protocol + '//'}${destination.host}`);
 }
 
+function rewriteStoreReferences(value, storefront, storeName, html = false) {
+  const rewritten = rewriteDescription(value, storefront);
+  const name = storeName?.trim() || new URL(storefront).hostname;
+  const replacement = html ? name.replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]) : name;
+  const replaceText = text => text.split(/((?:https?:\/\/|\/\/)[^\s<>"']+|[^\s<>"']+@[^\s<>"']+)/gi)
+    .map((part, index) => index % 2 ? part : part
+      .replace(/(^|[^\w@./-])(?:www\.)?vapordna\.com(?![\w-]|\.[a-z0-9])/gi,
+        (match, prefix) => `${prefix}${new URL(storefront).hostname}`)
+      .replace(/\bvapor(?:\s|&nbsp;|&#160;|&#x0*a0;)*dna\b(?!\.[a-z0-9])/gi, () => replacement)
+    ).join('');
+  if (!html) return replaceText(rewritten);
+  // Keep markup and URL paths intact; replace visible copy and accessible labels.
+  return rewritten.split(/(<[^>]*>)/g).map((part, index) => index % 2
+    ? part.replace(/\b(alt|title|aria-label)(\s*=\s*)(["'])([\s\S]*?)\3/gi,
+      (attribute, key, equals, quote, text) => `${key}${equals}${quote}${replaceText(text)}${quote}`)
+    : replaceText(part)).join('');
+}
+
 class ShopifyReplicationService {
   constructor(dependencies = {}) {
     this.registry = dependencies.registry || registry;
@@ -98,9 +118,9 @@ class ShopifyReplicationService {
 
   fields(product, shop) {
     return {
-      title: product.title, descriptionHtml: rewriteDescription(product.descriptionHtml, shop.primaryDomain.url),
+      title: product.title, descriptionHtml: rewriteStoreReferences(product.descriptionHtml, shop.primaryDomain.url, shop.name, true),
       vendor: product.vendor || '', productType: product.productType || '', tags: product.tags || [],
-      seo: { title: product.seo?.title || '', description: product.seo?.description || '' }
+      seo: { title: product.seo?.title || '', description: rewriteStoreReferences(product.seo?.description, shop.primaryDomain.url, shop.name) }
     };
   }
 
@@ -270,3 +290,5 @@ class ShopifyReplicationService {
 }
 module.exports = ShopifyReplicationService;
 module.exports.rewriteDescription = rewriteDescription;
+
+module.exports.rewriteStoreReferences = rewriteStoreReferences;

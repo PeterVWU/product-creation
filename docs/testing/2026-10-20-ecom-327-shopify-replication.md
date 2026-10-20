@@ -72,3 +72,11 @@ The test clones and destination-only test variants remain as drafts for inspecti
 Variant updates use bulk create/update operations rather than replacing a product's variant list. Creation explicitly uses [`PRESERVE_STANDALONE_VARIANT`](https://shopify.dev/docs/api/admin-graphql/2026-07/enums/ProductVariantsBulkCreateStrategy), because Shopify's default strategy can remove the only default variant.
 
 Product image refresh uses [`productSet`](https://shopify.dev/docs/api/admin-graphql/2026-07/mutations/productSet) with only its file list; it never supplies a replacement variant list, collections, or metafields. Variant image changes use [media detachment](https://shopify.dev/docs/api/admin-graphql/2026-07/mutations/productVariantDetachMedia) and [bulk variant updates](https://shopify.dev/docs/api/admin-graphql/2026-07/input-objects/ProductVariantsBulkInput).
+
+## Follow-up: destination branding in descriptions
+
+Product description text and accessible labels now replace case-insensitive VaporDNA / Vapor DNA references with the destination's Shopify shop name. SEO meta descriptions receive the same replacement as plain text. Source-host links and bare storefront references use the destination domain; URL paths, query values, unrelated domains and email addresses remain intact. HTML output escapes special characters in the destination name. SEO titles retain their existing behavior.
+
+Validation: **27 suites, 292 tests passed**, including create/content-update branding, HTML escaping, accessible labels, meta-description text, and URL/email preservation. Targeted lint and whitespace checks passed.
+
+The local API was restarted on port 3000. A content-update request for the existing Pixy test clone (`8918782214279`) was read back from Shopify: its description used `vwu-test-store`, and its meta description ended with `Shop vwu-test-store today.` Prices, status, images and the source listing were unchanged. Existing listings receive this correction through the content-update endpoint; repeating a create request keeps its established add-missing-variants behavior.

@@ -11,7 +11,7 @@ class ShopifyProductSource {
 
   async shop() {
     const result = await this.client.query(`query ReplicationShop {
-      shop { id myshopifyDomain primaryDomain { url } }
+      shop { id name myshopifyDomain primaryDomain { url } }
     }`);
     return result.data.shop;
   }
