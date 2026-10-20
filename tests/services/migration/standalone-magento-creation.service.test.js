@@ -58,9 +58,9 @@ describe('StandaloneMagentoCreationService', () => {
 
   beforeEach(() => {
     mockTargetService = {
-      createOrUpdateProduct: jest.fn().mockResolvedValue({ id: 999, sku: 'SIMPLE-001' }),
+      createProduct: jest.fn().mockResolvedValue({ id: 999, sku: 'SIMPLE-001' }),
       createScopedInstance: jest.fn().mockReturnValue({
-        createOrUpdateProduct: jest.fn().mockResolvedValue({ id: 999, sku: 'SIMPLE-001' })
+        updateProduct: jest.fn().mockResolvedValue({ id: 999, sku: 'SIMPLE-001' })
       })
     };
 
@@ -75,10 +75,10 @@ describe('StandaloneMagentoCreationService', () => {
   });
 
   describe('createProduct', () => {
-    it('calls createOrUpdateProduct with correct product data on first store view', async () => {
+    it('calls createProduct with correct product data on first store view', async () => {
       await service.createProduct(mockExtractedData, mockPreparedData, mockStoreViews, mockWebsiteIds, mockOptions);
 
-      expect(mockTargetService.createOrUpdateProduct).toHaveBeenCalledWith(
+      expect(mockTargetService.createProduct).toHaveBeenCalledWith(
         expect.objectContaining({
           sku: 'SIMPLE-001',
           type_id: 'simple',
@@ -93,7 +93,7 @@ describe('StandaloneMagentoCreationService', () => {
     it('excludes category_ids from custom_attributes and adds extension_attributes.category_links', async () => {
       await service.createProduct(mockExtractedData, mockPreparedData, mockStoreViews, mockWebsiteIds, mockOptions);
 
-      const callArg = mockTargetService.createOrUpdateProduct.mock.calls[0][0];
+      const callArg = mockTargetService.createProduct.mock.calls[0][0];
       const catIdAttr = callArg.custom_attributes.find(a => a.attribute_code === 'category_ids');
       expect(catIdAttr).toBeUndefined();
       expect(callArg.extension_attributes.category_links).toEqual([
@@ -106,7 +106,7 @@ describe('StandaloneMagentoCreationService', () => {
 
       expect(mockTargetService.createScopedInstance).toHaveBeenCalledWith('en_us');
       const scopedService = mockTargetService.createScopedInstance.mock.results[0].value;
-      expect(scopedService.createOrUpdateProduct).toHaveBeenCalled();
+      expect(scopedService.updateProduct).toHaveBeenCalled();
     });
 
     it('returns parentProductId from first store creation response', async () => {
@@ -128,7 +128,7 @@ describe('StandaloneMagentoCreationService', () => {
         { ...mockOptions, productEnabled: false }
       );
 
-      const callArg = mockTargetService.createOrUpdateProduct.mock.calls[0][0];
+      const callArg = mockTargetService.createProduct.mock.calls[0][0];
       expect(callArg.status).toBe(2); // DISABLED
     });
 

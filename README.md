@@ -435,6 +435,71 @@ Migrate a single product from source Magento to one or more target Magento insta
 }
 ```
 
+### VaporDNA → Shopify migration and updates
+
+VaporDNA is the approved master listing for this flow. Calling the API is the approval signal; no approval tag or automatic job is required. The source is the configured `vapordna` Shopify store. Destinations must be explicitly selected and must resolve to different Shopify shops.
+
+| Operation | POST endpoint | Behavior |
+|---|---|---|
+| Create / add missing variants | `/api/v1/migrate/product/shopify-to-shopify` | Creates an absent listing; an existing listing receives only missing variants and their requested images |
+| Update content | `/api/v1/sync/product-fields/shopify-to-shopify` | Refreshes approved content and requested images; adds missing variants |
+| Sync prices | `/api/v1/sync/prices/shopify-to-shopify` | Updates prices and compare-at prices on matching variants; run migration first if variants are missing |
+
+All three endpoints use the same request shape:
+
+```json
+{
+  "sourceProductId": "gid://shopify/Product/123456",
+  "options": {
+    "targetShopifyStores": ["test"],
+    "includeImages": true,
+    "productStatus": "DRAFT"
+  }
+}
+```
+
+- `sourceProductId`: required Shopify product GID or numeric ID **string**. Select the product ID in VaporDNA, not a variant ID or Magento SKU.
+- `targetShopifyStores`: required array of connected destination aliases. No default destination or “all stores” fallback is used. Duplicate aliases are collapsed.
+- `includeImages`: boolean, defaults to `true`; controls initial creation, missing-variant images, and image refresh on content updates. `false` leaves existing images and image associations unchanged. Price sync never changes images.
+- `productStatus`: `DRAFT` (default), `ACTIVE`, or `ARCHIVED`, applied only when a new listing is first created. Content and price updates preserve destination status. Creation attempts publication using the existing Online Store publication helper; channel publication and product status are separate settings.
+
+Creation copies the approved title, HTML description, vendor, product type, tags, SEO, options, variants/SKUs, price/compare-at price, barcode, taxability, inventory policy, weight, and requested images/variant images. It retains the source handle for newly created listings after a temporary recovery handle is no longer needed; a conflicting destination handle is reported. Approved content is copied directly without AI rewriting. Existing destination handles are preserved on content updates.
+
+Content updates replace title, description, vendor, product type, tags, SEO, requested product images and mapped variant image associations, and refresh mapped SKUs. Existing variant prices change only through price sync; newly added variants start with their source prices. Neither operation deletes destination variants. Collections and metafields are never copied or changed. Inventory tracking is enabled on new variants, but source stock quantities are never copied and existing destination stock quantities are preserved.
+
+Description URLs hosted at `vapordna.com` or `www.vapordna.com` are rewritten to the destination shop's `primaryDomain.url`, retaining paths, query strings, and fragments. Unrelated hosts and plain email addresses are left alone. This replaces domains only; it does not validate or remap linked paths.
+
+Run `npm run migrate` before using these endpoints (server startup also runs migrations). Product/variant mappings and uploaded image checkpoints are stored in `shopify_product_mappings`, keyed by canonical shop domains and the source product ID. Keep this table when backing up or restoring migration state. Repeated requests reuse mapped IDs, including after source SKU changes. If a mapped destination variant was removed, explicit migration can add it again; price sync reports missing variants instead. Before a mapping exists, exact SKU matches may adopt an existing listing only when unambiguous. Empty/duplicate source SKUs, ambiguous destination matches, a missing mapped product, and incompatible option names when adding variants produce explicit errors rather than guessing. Renaming/restructuring existing variant options is not part of content updates.
+
+Each request returns `results` by destination alias, with product IDs and per-store errors. Successful requests return HTTP `200`; destination failures return HTTP `207`, including when all destinations fail. Invalid request/source data returns `400`, and an absent source product returns `404`. Successful work is checkpointed so the same request can be retried. Requests for the same source product and destination are serialized in PostgreSQL. File uploads are checkpointed individually; subsequent variant operations use bounded batches and explicitly preserve standalone variants.
+
+Authorization uses existing permissions: `migrate:shopify`, `sync:product-fields`, and `sync:prices`, respectively. Requests record audit actions named `product:shopify_replication_create`, `product:shopify_replication_content`, and `product:shopify_replication_prices`. Notifications use the existing migration/content/price notification channels when enabled.
+
+#### Local verification against the test Shopify store
+
+```bash
+# Use a dedicated PostgreSQL database and normal Shopify credentials from .env.
+DB_NAME=product_migration_test DB_NAME_TEST=product_migration_test \
+  npm test -- --runInBand --detectOpenHandles
+
+# Pass real VaporDNA product IDs. This writes only to vwu-test-store.myshopify.com.
+DB_NAME=product_migration_live_test LOG_LEVEL=error \
+  node scripts/test-shopify-replication.js \
+  gid://shopify/Product/SINGLE_ID gid://shopify/Product/MULTI_ID
+
+# To exercise a partial creation failure, use a fresh multi-variant source listing.
+DB_NAME=product_migration_live_test LOG_LEVEL=error \
+  node scripts/test-shopify-replication.js --inject-failure \
+  gid://shopify/Product/FRESH_MULTI_ID
+
+# To verify additive migration with variant-specific images, use another fresh listing.
+DB_NAME=product_migration_live_test LOG_LEVEL=error \
+  node scripts/test-shopify-replication.js --partial-destination \
+  gid://shopify/Product/ANOTHER_FRESH_MULTI_ID
+```
+
+The live verifier starts a local HTTP server, creates a temporary operator key, disables external chat notifications, prohibits source mutations, and verifies the test destination's actual shop domain before writing. Use source listings absent from the destination, or previously created through this feature. It creates test listings, temporarily edits their destination content/SKU/prices, restores from VaporDNA, and adds a destination-only variant to verify preservation. The `--partial-destination` option prepares a one-variant destination fixture and verifies that migration adds the remaining variants and their images without deleting any variants. These draft listings and extra test variants remain available for inspection; the temporary API key is removed. It also checks source immutability, stock/status preservation, images, pricing, retries, partial failures, same-shop rejection, and persisted audit records. Keep automated database tests separate from the live-verification database.
+
 ### Batch Migration
 
 **POST** `/api/v1/migrate/products/batch`

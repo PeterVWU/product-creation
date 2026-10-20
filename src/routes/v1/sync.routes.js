@@ -6,6 +6,9 @@ const auth = require('../../middleware/auth.middleware');
 const permit = require('../../middleware/permission.middleware');
 const { syncPrices, updateProductFields } = require('../../controllers/sync.controller');
 
+const replicationValidation = require('../../middleware/shopify-replication-validation.middleware');
+const replicationController = require('../../controllers/shopify-replication.controller');
+
 const router = express.Router();
 
 router.post(
@@ -80,6 +83,19 @@ router.post(
     validateRequest
   ],
   asyncHandler(updateProductFields)
+);
+
+router.post(
+  '/product-fields/shopify-to-shopify',
+  auth(), permit('sync:product-fields'),
+  replicationValidation(),
+  asyncHandler(replicationController('content'))
+);
+router.post(
+  '/prices/shopify-to-shopify',
+  auth(), permit('sync:prices'),
+  replicationValidation(),
+  asyncHandler(replicationController('prices'))
 );
 
 module.exports = router;

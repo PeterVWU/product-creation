@@ -80,14 +80,14 @@ describe('ShopifyCreationService.createStandaloneProduct', () => {
     });
   });
 
-  it('calls createProductWithVariants with no productOptions array', async () => {
+  it('calls createProductWithVariants with the default Title option', async () => {
     await service.createStandaloneProduct(mockExtractedData, 'teststore');
 
     const [, productOptions] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
-    expect(productOptions).toEqual([]);
+    expect(productOptions).toEqual([{ name: 'Title', values: [{ name: 'Default Title' }] }]);
   });
 
-  it('calls createProductWithVariants with a single variant that has no optionValues', async () => {
+  it('calls createProductWithVariants with a single variant with the default option value', async () => {
     await service.createStandaloneProduct(mockExtractedData, 'teststore');
 
     const [, , variants] = mockShopifyTargetService.createProductWithVariants.mock.calls[0];
@@ -96,8 +96,7 @@ describe('ShopifyCreationService.createStandaloneProduct', () => {
       sku: 'SIMPLE-001',
       price: '29.99'
     });
-    // optionValues must be absent — not an empty array
-    expect(variants[0].optionValues).toBeUndefined();
+    expect(variants[0].optionValues).toEqual([{ optionName: 'Title', name: 'Default Title' }]);
   });
 
   it('uses getShopifyProductType for productType (store-aware)', async () => {

@@ -10,6 +10,9 @@ const {
   migrateProductToShopify
 } = require('../../controllers/migration.controller');
 
+const replicationValidation = require('../../middleware/shopify-replication-validation.middleware');
+const replicationController = require('../../controllers/shopify-replication.controller');
+
 const router = express.Router();
 
 router.post(
@@ -118,6 +121,13 @@ router.post(
     validateRequest
   ],
   asyncHandler(migrateProductToShopify)
+);
+
+router.post(
+  '/product/shopify-to-shopify',
+  auth(), permit('migrate:shopify'),
+  replicationValidation(),
+  asyncHandler(replicationController('create'))
 );
 
 module.exports = router;

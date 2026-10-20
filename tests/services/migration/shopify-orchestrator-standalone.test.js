@@ -1,3 +1,6 @@
+jest.mock('../../../src/services/ai/content-generation.service');
+jest.mock('../../../src/database/repositories/ai-prompt.repository', () => ({ findActiveByStore: jest.fn().mockResolvedValue(null) }));
+jest.mock('../../../src/services/notification/slack.service');
 // tests/services/migration/shopify-orchestrator-standalone.test.js
 'use strict';
 
@@ -63,7 +66,8 @@ describe('ShopifyOrchestratorService — standalone simple path', () => {
 
     mockShopifyTargetInstance = {
       getVariantsBySkus: jest.fn().mockResolvedValue([]), // product doesn't exist
-      buildAdminUrl: jest.fn().mockReturnValue('https://admin.shopify.com/products/456')
+      buildAdminUrl: jest.fn().mockReturnValue('https://admin.shopify.com/products/456'),
+      buildStorefrontUrl: jest.fn().mockReturnValue('https://wholesale.myshopify.com/products/test-simple')
     };
     ShopifyTargetService.mockImplementation(() => mockShopifyTargetInstance);
 

@@ -1,3 +1,5 @@
+jest.mock('../../../src/database/repositories/ai-prompt.repository', () => ({ findActiveByStore: jest.fn().mockResolvedValue(null) }));
+jest.mock('../../../src/services/notification/slack.service');
 // tests/services/migration/orchestrator-standalone.test.js
 'use strict';
 

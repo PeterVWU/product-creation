@@ -23,12 +23,13 @@ describe('role.repository', () => {
     expect(role).toBeNull();
   });
 
-  test('findAll returns all three seeded roles', async () => {
+  test('findAll returns all four seeded roles', async () => {
     const roles = await roleRepo.findAll();
-    expect(roles).toHaveLength(3);
+    expect(roles).toHaveLength(4);
     const ids = roles.map(r => r.id);
     expect(ids).toContain('admin');
     expect(ids).toContain('operator');
+    expect(ids).toContain('operator-readonly');
     expect(ids).toContain('viewer');
   });
 });

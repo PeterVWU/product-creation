@@ -1,3 +1,4 @@
+jest.mock('../../../src/services/notification/notification.service');
 'use strict';
 
 jest.mock('../../../src/services/magento/source.service');
@@ -241,17 +242,11 @@ describe('ProductUpdateService', () => {
       );
     });
 
-    it('updates store-view scoped fields on each store view', async () => {
+    it('updates content globally through the all-store scope', async () => {
       await service.updateMagentoStore('ejuices', extractedData);
-
-      expect(mockTargetInstance.getStoreWebsiteMapping).toHaveBeenCalled();
-      expect(mockTargetInstance.createScopedInstance).toHaveBeenCalledWith('default');
-      const scopedService = mockTargetInstance.createScopedInstance.mock.results[0].value;
-      expect(scopedService.updateProduct).toHaveBeenCalledWith(
-        'PARENT-001',
-        expect.objectContaining({
-          name: 'My Product'
-        })
+      expect(mockTargetInstance.client.put).toHaveBeenCalledWith(
+        '/rest/all/V1/products/PARENT-001',
+        expect.objectContaining({ product: expect.objectContaining({ name: 'My Product' }) })
       );
     });
 
@@ -429,8 +424,8 @@ describe('ProductUpdateService', () => {
       service.sourceService.getProductBySku = jest.fn().mockResolvedValue(sourceProduct);
       service.attributeService.translateBrandAttribute = jest.fn().mockResolvedValue('BrandCo');
       service.attributeService.translateCategories = jest.fn().mockResolvedValue({ '5': 'Vapes' });
-      service.googleChatService.notifyProductUpdateStart = jest.fn().mockResolvedValue(undefined);
-      service.googleChatService.notifyProductUpdateEnd = jest.fn().mockResolvedValue(undefined);
+      service.notificationService.notifyProductUpdateStart = jest.fn().mockResolvedValue(undefined);
+      service.notificationService.notifyProductUpdateEnd = jest.fn().mockResolvedValue(undefined);
       service.updateMagentoStore = jest.fn().mockResolvedValue({ success: true, warnings: [] });
       service.updateShopifyStore = jest.fn().mockResolvedValue({ success: true, warnings: [] });
     });
@@ -438,7 +433,7 @@ describe('ProductUpdateService', () => {
     it('throws immediately when source product not found', async () => {
       service.sourceService.getProductBySku.mockResolvedValue(null);
       await expect(service.updateProductFields('MISSING-SKU')).rejects.toThrow();
-      expect(service.googleChatService.notifyProductUpdateStart).not.toHaveBeenCalled();
+      expect(service.notificationService.notifyProductUpdateStart).not.toHaveBeenCalled();
     });
 
     it('sends start notification after extraction', async () => {
@@ -446,7 +441,7 @@ describe('ProductUpdateService', () => {
         targetMagentoStores: ['ejuices'],
         targetShopifyStores: []
       });
-      expect(service.googleChatService.notifyProductUpdateStart).toHaveBeenCalledWith(
+      expect(service.notificationService.notifyProductUpdateStart).toHaveBeenCalledWith(
         'PARENT-001',
         expect.any(Array)
       );
@@ -470,7 +465,7 @@ describe('ProductUpdateService', () => {
 
     it('sends end notification on success', async () => {
       await service.updateProductFields('PARENT-001', { targetMagentoStores: ['ejuices'], includeShopify: false });
-      expect(service.googleChatService.notifyProductUpdateEnd).toHaveBeenCalledWith(
+      expect(service.notificationService.notifyProductUpdateEnd).toHaveBeenCalledWith(
         expect.objectContaining({ sku: 'PARENT-001', success: true })
       );
     });
@@ -478,7 +473,7 @@ describe('ProductUpdateService', () => {
     it('sends end notification even when a store update fails', async () => {
       service.updateMagentoStore.mockResolvedValue({ success: false, error: 'not found' });
       await service.updateProductFields('PARENT-001', { targetMagentoStores: ['ejuices'], includeShopify: false });
-      expect(service.googleChatService.notifyProductUpdateEnd).toHaveBeenCalled();
+      expect(service.notificationService.notifyProductUpdateEnd).toHaveBeenCalled();
     });
 
     it('returns result.success false when any store fails', async () => {
